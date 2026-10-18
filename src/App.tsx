@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import "./App.css";
+import { Recorder } from "./Recorder";
 import {
   AppInfo,
   LLM_PROVIDERS,
@@ -37,20 +38,8 @@ function App() {
         </nav>
         <div className="version">{info ? `v${info.version}` : ""}</div>
       </aside>
-      <main className="content">{view === "meetings" ? <Meetings /> : <SettingsView />}</main>
+      <main className="content">{view === "meetings" ? <Recorder /> : <SettingsView />}</main>
     </div>
-  );
-}
-
-function Meetings() {
-  return (
-    <section className="empty">
-      <h1>No meetings yet</h1>
-      <p>Parley records your mic and the call audio on this Mac, writes a live transcript, and turns your rough notes into clean ones.</p>
-      <button className="primary" disabled title="Recording arrives in the next release">
-        Start recording
-      </button>
-    </section>
   );
 }
 

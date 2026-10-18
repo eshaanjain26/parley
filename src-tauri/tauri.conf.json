@@ -41,7 +41,11 @@
     "shortDescription": "Local-first AI meeting notes",
     "copyright": "Copyright 2026 Eshaan Jain. MIT License.",
     "macOS": {
-      "minimumSystemVersion": "14.4"
-    }
+      "minimumSystemVersion": "14.4",
+      "entitlements": "Entitlements.plist"
+    },
+    "externalBin": [
+      "binaries/parley-audiotap"
+    ]
   }
 }

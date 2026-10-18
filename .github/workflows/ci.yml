@@ -30,6 +30,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Frontend tests
+        run: npm test
+
       - name: Typecheck and build frontend
         run: npm run build
 
