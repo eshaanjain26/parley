@@ -36,6 +36,10 @@ fn build_audiotap() {
         .args([
             "swiftc",
             "-O",
+            // The sidecar is a top-level script; pin the language mode so a toolchain that
+            // defaults to Swift 6 strict concurrency doesn't break the build.
+            "-swift-version",
+            "5",
             "-target",
             &format!("{arch}-apple-macos14.4"),
         ])

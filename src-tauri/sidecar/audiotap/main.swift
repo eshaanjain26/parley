@@ -26,7 +26,7 @@ func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddr
         mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
 }
 
-func getProperty<T: BitwiseCopyable>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ value: inout T) -> OSStatus {
+func getProperty<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, _ value: inout T) -> OSStatus {
     var addr = address(selector)
     var size = UInt32(MemoryLayout<T>.size)
     return withUnsafeMutablePointer(to: &value) { AudioObjectGetPropertyData(object, &addr, 0, nil, &size, $0) }
@@ -94,17 +94,17 @@ let sampleRate = format.mSampleRate
 // Core Audio only runs the IO proc while something is playing, so silent stretches arrive as
 // gaps. Track the output position against the host clock and write zeros for any gap; this
 // keeps the system track aligned in time with the microphone track.
-var timebase = mach_timebase_info_data_t()
-mach_timebase_info(&timebase)
-func hostSeconds(_ ticks: UInt64) -> Double {
-    Double(ticks) * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
-}
+let secondsPerHostTick: Double = {
+    var timebase = mach_timebase_info_data_t()
+    mach_timebase_info(&timebase)
+    return Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
+}()
 var startHostTime: UInt64 = 0
 var framesWritten = 0  // only touched on writeQueue
 let gapToleranceFrames = Int(sampleRate * 0.05)
 
 func writeSilence(upTo hostTime: UInt64) {
-    let expected = Int(hostSeconds(hostTime &- startHostTime) * sampleRate)
+    let expected = Int(Double(hostTime &- startHostTime) * secondsPerHostTick * sampleRate)
     let missing = expected - framesWritten
     guard missing > gapToleranceFrames else { return }
     let zeros = [Float](repeating: 0, count: missing)
