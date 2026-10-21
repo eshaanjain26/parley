@@ -1,5 +1,6 @@
 mod capture;
 mod dsp;
+mod secrets;
 mod settings;
 mod stt;
 mod transcribe;
@@ -141,6 +142,49 @@ impl ModelCache {
     }
 }
 
+/// Keychain account for a cloud provider's API key; `None` for on-device engines.
+fn key_account(provider: SpeechProvider) -> Option<&'static str> {
+    match provider {
+        SpeechProvider::LocalWhisper => None,
+        SpeechProvider::Deepgram => Some("deepgram"),
+        SpeechProvider::AssemblyAi => Some("assemblyai"),
+    }
+}
+
+/// Error prefix the UI recognises to send the user to Settings for a missing key.
+const KEY_MISSING: &str = "api-key-missing:";
+
+fn cloud_key(provider: SpeechProvider) -> Result<String, String> {
+    let account = key_account(provider).ok_or("not a cloud provider")?;
+    secrets::get(account)?.ok_or_else(|| format!("{KEY_MISSING}{account}"))
+}
+
+#[tauri::command]
+fn set_api_key(provider: SpeechProvider, key: String) -> Result<(), String> {
+    secrets::set(key_account(provider).ok_or("not a cloud provider")?, &key)
+}
+
+#[tauri::command]
+fn delete_api_key(provider: SpeechProvider) -> Result<(), String> {
+    secrets::delete(key_account(provider).ok_or("not a cloud provider")?)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiKeyStatus {
+    deepgram: bool,
+    assembly_ai: bool,
+}
+
+/// Only whether each key exists; the keys themselves never leave the Rust side.
+#[tauri::command]
+fn api_key_status() -> Result<ApiKeyStatus, String> {
+    Ok(ApiKeyStatus {
+        deepgram: secrets::get("deepgram")?.is_some(),
+        assembly_ai: secrets::get("assemblyai")?.is_some(),
+    })
+}
+
 /// One engine for the mic track and one for system audio.
 type EnginePair = (Box<dyn SpeechToText>, Box<dyn SpeechToText>);
 
@@ -165,9 +209,20 @@ fn speech_engines(
                 Box::new(WhisperEngine::new(&loaded, &settings.language)?),
             ))
         }
-        SpeechProvider::Deepgram | SpeechProvider::AssemblyAi => Err(
-            "Cloud transcription isn't available yet. Choose \"On this Mac\" in Settings.".into(),
-        ),
+        SpeechProvider::Deepgram => {
+            let key = cloud_key(SpeechProvider::Deepgram)?;
+            Ok((
+                Box::new(stt::cloud::deepgram(&key, &settings.language)?),
+                Box::new(stt::cloud::deepgram(&key, &settings.language)?),
+            ))
+        }
+        SpeechProvider::AssemblyAi => {
+            let key = cloud_key(SpeechProvider::AssemblyAi)?;
+            Ok((
+                Box::new(stt::cloud::assembly_ai(&key)?),
+                Box::new(stt::cloud::assembly_ai(&key)?),
+            ))
+        }
     }
 }
 
@@ -352,6 +407,9 @@ pub fn run() {
             list_models,
             download_model,
             cancel_model_download,
+            set_api_key,
+            delete_api_key,
+            api_key_status,
             start_recording,
             stop_recording
         ])
