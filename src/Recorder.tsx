@@ -58,7 +58,11 @@ export function Recorder() {
     setPhase("starting");
     try {
       const started = await startRecording();
-      setWarning(started.warning ? `System audio is off: ${started.warning}. Recording your microphone only.` : null);
+      const notes = [
+        started.warning && `System audio is off: ${started.warning}. Recording your microphone only.`,
+        started.micWarning && `Echo cancellation is off (${started.micWarning}). Use headphones, or the call may also appear under "You".`,
+      ].filter(Boolean);
+      setWarning(notes.length ? notes.join(" ") : null);
       setPhase("recording");
     } catch (e) {
       const message = String(e);

@@ -7,6 +7,7 @@ export interface RecordingStarted {
   id: string;
   systemAudio: boolean;
   warning: string | null;
+  micWarning: string | null;
 }
 
 export interface RecordingFinished {
