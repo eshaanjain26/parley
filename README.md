@@ -20,6 +20,14 @@ npm install
 npm run tauri dev
 ```
 
+### Signing dev builds
+
+Unsigned builds get a new identity every time, so macOS asks again for microphone, system audio and Keychain access after each rebuild. Create a local code-signing certificate once (Keychain Access > Certificate Assistant > Create a Certificate, type "Code Signing", then set it to Always Trust for code signing) and build with it:
+
+```bash
+APPLE_SIGNING_IDENTITY="Parley Dev" npm run tauri build -- --debug --bundles app
+```
+
 ## Test
 
 ```bash

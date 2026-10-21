@@ -8,12 +8,14 @@ interface Props {
   meetingId: string;
   initialTitle: string;
   initialJson: string;
+  /** Receives a function that saves any pending edit immediately. */
+  onFlushReady?: (flush: () => Promise<void>) => void;
 }
 
 type SaveState = "saved" | "saving" | "error";
 
 /** Title plus rich-text notes, autosaved to the encrypted store 800 ms after the last edit. */
-export function NotesEditor({ meetingId, initialTitle, initialJson }: Props) {
+export function NotesEditor({ meetingId, initialTitle, initialJson, onFlushReady }: Props) {
   const [title, setTitle] = useState(initialTitle);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const titleRef = useRef(initialTitle);
@@ -49,6 +51,10 @@ export function NotesEditor({ meetingId, initialTitle, initialJson }: Props) {
       notesText: editor.getText({ blockSeparator: "\n" }),
     });
   };
+
+  useEffect(() => {
+    onFlushReady?.(saver.flush);
+  }, [saver, onFlushReady]);
 
   // Leaving the meeting (or the app view) must not drop the last few keystrokes.
   useEffect(

@@ -27,6 +27,10 @@ pub struct Settings {
     pub llm_provider: LlmProvider,
     pub ollama_url: String,
     pub ollama_model: String,
+    /// Base URL including the API version path, e.g. https://api.openai.com/v1.
+    pub openai_base_url: String,
+    pub openai_model: String,
+    pub anthropic_model: String,
     /// Keep each meeting's WAV files after transcription. Off by default: the encrypted
     /// transcript is the record, and raw audio is the most sensitive thing Parley handles.
     pub keep_audio: bool,
@@ -41,6 +45,9 @@ impl Default for Settings {
             llm_provider: LlmProvider::Ollama,
             ollama_url: "http://127.0.0.1:11434".into(),
             ollama_model: "llama3.2:3b".into(),
+            openai_base_url: "https://api.openai.com/v1".into(),
+            openai_model: String::new(),
+            anthropic_model: crate::llm::DEFAULT_ANTHROPIC_MODEL.into(),
             keep_audio: false,
         }
     }

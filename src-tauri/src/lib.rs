@@ -1,5 +1,7 @@
 mod capture;
 mod dsp;
+mod enhance;
+mod llm;
 mod secrets;
 mod settings;
 mod store;
@@ -7,7 +9,7 @@ mod stt;
 mod transcribe;
 
 use capture::{Recording, Sidecars};
-use settings::{Settings, SpeechProvider};
+use settings::{LlmProvider, Settings, SpeechProvider};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -145,7 +147,10 @@ impl ModelCache {
     }
 }
 
-/// Keychain account for a cloud provider's API key; `None` for on-device engines.
+/// Keychain accounts for API keys the user can set.
+const KEY_ACCOUNTS: &[&str] = &["deepgram", "assemblyai", "openai", "anthropic"];
+
+/// Keychain account for a speech provider's API key; `None` for on-device engines.
 fn key_account(provider: SpeechProvider) -> Option<&'static str> {
     match provider {
         SpeechProvider::LocalWhisper => None,
@@ -157,35 +162,182 @@ fn key_account(provider: SpeechProvider) -> Option<&'static str> {
 /// Error prefix the UI recognises to send the user to Settings for a missing key.
 const KEY_MISSING: &str = "api-key-missing:";
 
-fn cloud_key(provider: SpeechProvider) -> Result<String, String> {
-    let account = key_account(provider).ok_or("not a cloud provider")?;
+fn required_key(account: &str) -> Result<String, String> {
     secrets::get(account)?.ok_or_else(|| format!("{KEY_MISSING}{account}"))
 }
 
-#[tauri::command]
-fn set_api_key(provider: SpeechProvider, key: String) -> Result<(), String> {
-    secrets::set(key_account(provider).ok_or("not a cloud provider")?, &key)
+fn cloud_key(provider: SpeechProvider) -> Result<String, String> {
+    required_key(key_account(provider).ok_or("not a cloud provider")?)
+}
+
+fn checked_account(account: &str) -> Result<&str, String> {
+    KEY_ACCOUNTS
+        .iter()
+        .find(|a| **a == account)
+        .copied()
+        .ok_or_else(|| format!("unknown key {account:?}"))
 }
 
 #[tauri::command]
-fn delete_api_key(provider: SpeechProvider) -> Result<(), String> {
-    secrets::delete(key_account(provider).ok_or("not a cloud provider")?)
+fn set_api_key(account: String, key: String) -> Result<(), String> {
+    secrets::set(checked_account(&account)?, &key)
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ApiKeyStatus {
-    deepgram: bool,
-    assembly_ai: bool,
-}
-
-/// Only whether each key exists; the keys themselves never leave the Rust side.
 #[tauri::command]
-fn api_key_status() -> Result<ApiKeyStatus, String> {
-    Ok(ApiKeyStatus {
-        deepgram: secrets::get("deepgram")?.is_some(),
-        assembly_ai: secrets::get("assemblyai")?.is_some(),
+fn delete_api_key(account: String) -> Result<(), String> {
+    secrets::delete(checked_account(&account)?)
+}
+
+/// Which keys exist, by account; the keys themselves never leave the Rust side.
+#[tauri::command]
+fn api_key_status() -> Result<std::collections::BTreeMap<&'static str, bool>, String> {
+    KEY_ACCOUNTS
+        .iter()
+        .map(|a| Ok((*a, secrets::get(a)?.is_some())))
+        .collect()
+}
+
+#[tauri::command]
+fn list_templates(store: State<'_, StoreState>) -> Result<Vec<enhance::Template>, String> {
+    list_templates_from(store.get()?)
+}
+
+#[tauri::command]
+fn save_template(
+    store: State<'_, StoreState>,
+    mut template: enhance::Template,
+) -> Result<enhance::Template, String> {
+    let now = now_ms()?;
+    if template.id.is_empty() {
+        template.id = format!("custom-{now}");
+    }
+    if enhance::built_in_templates()
+        .iter()
+        .any(|t| t.id == template.id)
+    {
+        return Err("built-in templates can't be changed; save a copy instead".into());
+    }
+    template.built_in = false;
+    store.get()?.save_template(&template, now)?;
+    Ok(template)
+}
+
+#[tauri::command]
+fn delete_template(store: State<'_, StoreState>, id: String) -> Result<(), String> {
+    store.get()?.delete_template(&id)
+}
+
+fn llm_provider(settings: &Settings) -> Result<llm::Provider, String> {
+    Ok(match settings.llm_provider {
+        LlmProvider::Ollama => llm::Provider::Ollama {
+            url: settings.ollama_url.clone(),
+            model: settings.ollama_model.clone(),
+        },
+        LlmProvider::OpenAiCompatible => {
+            if settings.openai_model.trim().is_empty() {
+                return Err(
+                    "Set the model name for your OpenAI-compatible provider in Settings.".into(),
+                );
+            }
+            llm::Provider::OpenAiCompatible {
+                base_url: settings.openai_base_url.clone(),
+                model: settings.openai_model.trim().to_string(),
+                api_key: required_key("openai")?,
+            }
+        }
+        LlmProvider::Anthropic => llm::Provider::Anthropic {
+            base_url: "https://api.anthropic.com".into(),
+            model: settings.anthropic_model.trim().to_string(),
+            api_key: required_key("anthropic")?,
+        },
     })
+}
+
+#[derive(Default)]
+struct EnhanceState(Mutex<Option<Arc<AtomicBool>>>);
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct EnhanceDelta {
+    meeting_id: String,
+    text: String,
+}
+
+/// Writes enhanced notes for a meeting, streaming `enhance-delta` events as text arrives, and
+/// saves the result. One enhancement runs at a time.
+#[tauri::command]
+async fn enhance_meeting(
+    app: tauri::AppHandle,
+    store: State<'_, StoreState>,
+    running: State<'_, EnhanceState>,
+    meeting_id: String,
+    template_id: String,
+) -> Result<store::Meeting, String> {
+    let store = store.get()?;
+    let meeting = store.get_meeting(&meeting_id)?.ok_or("meeting not found")?;
+    let template = list_templates_from(store)?
+        .into_iter()
+        .find(|t| t.id == template_id)
+        .ok_or("template not found")?;
+    let settings = settings::load(&settings_path(&app)?).map_err(|e| e.to_string())?;
+    let provider = llm_provider(&settings)?;
+    let prompt = enhance::build_prompt(
+        &template,
+        &meeting.title,
+        &meeting.notes_text,
+        &meeting.transcript,
+        provider.transcript_budget_chars(),
+    );
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut slot = running.0.lock().map_err(|e| e.to_string())?;
+        if slot.is_some() {
+            return Err("Already enhancing a meeting".into());
+        }
+        *slot = Some(cancel.clone());
+    }
+    let emitter = app.clone();
+    let id = meeting_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        llm::stream(
+            &provider,
+            &prompt.system,
+            &prompt.user,
+            |text| {
+                let _ = emitter.emit(
+                    "enhance-delta",
+                    EnhanceDelta {
+                        meeting_id: id.clone(),
+                        text: text.to_string(),
+                    },
+                );
+            },
+            &cancel,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string());
+    *running.0.lock().map_err(|e| e.to_string())? = None;
+    let markdown = result??;
+    store.save_enhanced(&meeting_id, markdown.trim(), &template.id, now_ms()?)?;
+    store
+        .get_meeting(&meeting_id)?
+        .ok_or_else(|| "meeting disappeared after saving".into())
+}
+
+fn list_templates_from(store: &Store) -> Result<Vec<enhance::Template>, String> {
+    let mut all = enhance::built_in_templates();
+    all.extend(store.custom_templates()?);
+    Ok(all)
+}
+
+#[tauri::command]
+fn cancel_enhance(running: State<'_, EnhanceState>) -> Result<(), String> {
+    if let Some(flag) = running.0.lock().map_err(|e| e.to_string())?.as_ref() {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
 }
 
 /// One engine for the mic track and one for system audio.
@@ -239,7 +391,11 @@ impl StoreState {
         match self.0.get() {
             Some(Ok(store)) => Ok(store),
             Some(Err(e)) => Err(e.clone()),
-            None => Err("the meeting database isn't open yet".into()),
+            None => Err(
+                "Parley is still unlocking your meeting database. If macOS asks for \
+                         Keychain access, choose Always Allow."
+                    .into(),
+            ),
         }
     }
 }
@@ -465,16 +621,22 @@ pub fn run() {
     tauri::Builder::default()
         .manage(StoreState::default())
         .setup(|app| {
-            let opened = open_store(app.handle());
-            if let Err(e) = &opened {
-                eprintln!("could not open the meeting database: {e}");
-            }
-            let _ = app.state::<StoreState>().0.set(opened);
+            // Reading the database key can wait on a macOS Keychain prompt. Off the main thread,
+            // so the window still appears and can say what it's waiting for.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let opened = open_store(&handle);
+                if let Err(e) = &opened {
+                    eprintln!("could not open the meeting database: {e}");
+                }
+                let _ = handle.state::<StoreState>().0.set(opened);
+            });
             Ok(())
         })
         .manage(RecorderState::default())
         .manage(ModelCache::default())
         .manage(DownloadState::default())
+        .manage(EnhanceState::default())
         .invoke_handler(tauri::generate_handler![
             app_info,
             get_settings,
@@ -485,6 +647,11 @@ pub fn run() {
             set_api_key,
             delete_api_key,
             api_key_status,
+            list_templates,
+            save_template,
+            delete_template,
+            enhance_meeting,
+            cancel_enhance,
             get_meeting,
             save_notes,
             start_recording,

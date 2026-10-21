@@ -10,6 +10,9 @@ export interface Meeting {
   notesJson: string;
   notesText: string;
   updatedAtMs: number;
+  enhancedMd: string;
+  enhancedTemplateId: string;
+  enhancedAtMs: number | null;
   transcript: TranscriptLine[];
 }
 

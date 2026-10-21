@@ -1,6 +1,7 @@
 //! Meetings, notes and transcripts in an encrypted SQLite database (SQLCipher, AES-256 via
 //! Apple CommonCrypto). The 256-bit key lives in the macOS Keychain, never on disk.
 
+use crate::enhance::Template;
 use crate::transcribe::{Speaker, TranscriptLine};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
@@ -24,6 +25,10 @@ pub struct Meeting {
     /// Plain text of the notes, kept alongside for search and AI prompts.
     pub notes_text: String,
     pub updated_at_ms: i64,
+    /// AI-enhanced notes (Markdown); empty until the user runs Enhance.
+    pub enhanced_md: String,
+    pub enhanced_template_id: String,
+    pub enhanced_at_ms: Option<i64>,
     pub transcript: Vec<TranscriptLine>,
 }
 
@@ -48,6 +53,16 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (meeting_id, speaker, segment_id)
     );
     CREATE INDEX meetings_by_start ON meetings(started_at_ms DESC);",
+    // v2: AI-enhanced notes and the user's own templates
+    "ALTER TABLE meetings ADD COLUMN enhanced_md TEXT NOT NULL DEFAULT '';
+    ALTER TABLE meetings ADD COLUMN enhanced_template_id TEXT NOT NULL DEFAULT '';
+    ALTER TABLE meetings ADD COLUMN enhanced_at_ms INTEGER;
+    CREATE TABLE templates (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        updated_at_ms INTEGER NOT NULL
+    );",
 ];
 
 fn hex(bytes: &[u8]) -> String {
@@ -191,7 +206,8 @@ impl Store {
         let conn = self.0.lock().map_err(|e| e.to_string())?;
         let meeting = conn
             .query_row(
-                "SELECT id, title, started_at_ms, duration_secs, notes_json, notes_text, updated_at_ms
+                "SELECT id, title, started_at_ms, duration_secs, notes_json, notes_text, updated_at_ms,
+                        enhanced_md, enhanced_template_id, enhanced_at_ms
                  FROM meetings WHERE id = ?1",
                 params![id],
                 |r| {
@@ -203,6 +219,9 @@ impl Store {
                         notes_json: r.get(4)?,
                         notes_text: r.get(5)?,
                         updated_at_ms: r.get(6)?,
+                        enhanced_md: r.get(7)?,
+                        enhanced_template_id: r.get(8)?,
+                        enhanced_at_ms: r.get(9)?,
                         transcript: Vec::new(),
                     })
                 },
@@ -238,6 +257,69 @@ impl Store {
             .collect::<Result<_, _>>()
             .map_err(|e| e.to_string())?;
         Ok(Some(meeting))
+    }
+}
+
+impl Store {
+    pub fn save_enhanced(
+        &self,
+        id: &str,
+        markdown: &str,
+        template_id: &str,
+        at_ms: i64,
+    ) -> Result<(), String> {
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        let changed = conn
+            .execute(
+                "UPDATE meetings SET enhanced_md = ?2, enhanced_template_id = ?3, enhanced_at_ms = ?4
+                 WHERE id = ?1",
+                params![id, markdown, template_id, at_ms],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            return Err(format!("meeting {id} not found"));
+        }
+        Ok(())
+    }
+
+    pub fn custom_templates(&self) -> Result<Vec<Template>, String> {
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, name, instructions FROM templates ORDER BY name COLLATE NOCASE")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(Template {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    instructions: r.get(2)?,
+                    built_in: false,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    }
+
+    /// Creates or replaces a custom template.
+    pub fn save_template(&self, t: &Template, at_ms: i64) -> Result<(), String> {
+        if t.name.trim().is_empty() || t.instructions.trim().is_empty() {
+            return Err("a template needs a name and instructions".into());
+        }
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO templates (id, name, instructions, updated_at_ms) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET name = ?2, instructions = ?3, updated_at_ms = ?4",
+            params![t.id, t.name.trim(), t.instructions.trim(), at_ms],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn delete_template(&self, id: &str) -> Result<(), String> {
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM templates WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
 
@@ -375,6 +457,77 @@ mod tests {
         );
         let err = Store::open(&path, &[8; KEY_LEN]).err().unwrap();
         assert!(err.contains("can't be opened"), "{err}");
+    }
+
+    #[test]
+    fn enhanced_notes_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("parley.db"), &KEY).unwrap();
+        store.create_meeting("m1", "t", 0).unwrap();
+        assert_eq!(
+            store.get_meeting("m1").unwrap().unwrap().enhanced_at_ms,
+            None
+        );
+        store
+            .save_enhanced("m1", "## Decisions\n- Ship Friday", "general", 9)
+            .unwrap();
+        let m = store.get_meeting("m1").unwrap().unwrap();
+        assert_eq!(m.enhanced_md, "## Decisions\n- Ship Friday");
+        assert_eq!(m.enhanced_template_id, "general");
+        assert_eq!(m.enhanced_at_ms, Some(9));
+        assert!(store.save_enhanced("nope", "x", "general", 1).is_err());
+    }
+
+    #[test]
+    fn custom_templates_create_update_list_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("parley.db"), &KEY).unwrap();
+        let t = |id: &str, name: &str| Template {
+            id: id.into(),
+            name: name.into(),
+            instructions: "## Risks".into(),
+            built_in: false,
+        };
+        store.save_template(&t("b", "Board prep"), 1).unwrap();
+        store.save_template(&t("a", "account review"), 1).unwrap();
+        store.save_template(&t("b", "Board prep v2"), 2).unwrap();
+        let names: Vec<String> = store
+            .custom_templates()
+            .unwrap()
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+        assert_eq!(names, ["account review", "Board prep v2"]);
+        store.delete_template("a").unwrap();
+        assert_eq!(store.custom_templates().unwrap().len(), 1);
+        assert!(store.save_template(&t("c", "  "), 1).is_err());
+    }
+
+    #[test]
+    fn a_v1_database_upgrades_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("parley.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";", hex(&KEY)))
+                .unwrap();
+            conn.execute_batch(&format!(
+                "BEGIN; {}; PRAGMA user_version = 1; COMMIT;",
+                MIGRATIONS[0]
+            ))
+            .unwrap();
+            conn.execute(
+                "INSERT INTO meetings (id, title, started_at_ms, notes_text, updated_at_ms)
+                 VALUES ('old', 'Before upgrade', 1, 'kept', 1)",
+                [],
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path, &KEY).unwrap();
+        let m = store.get_meeting("old").unwrap().unwrap();
+        assert_eq!(m.notes_text, "kept");
+        assert_eq!(m.enhanced_md, "");
+        assert!(store.custom_templates().unwrap().is_empty());
     }
 
     #[test]

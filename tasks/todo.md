@@ -31,8 +31,8 @@ Rust core
 - [x] **M0 Toolchain + scaffold**: install rustup and cmake, create Tauri 2 app, CI that builds and tests on macOS. Bootstrap repo.
 - [x] **M1 Capture**: Swift tap sidecar, mic capture, mixer, permission prompts (mic + system audio), level meters. Tests on resampler and chunker.
 - [x] **M2 Live transcript**: whisper.cpp local streaming with partials, then Deepgram and AssemblyAI behind the same trait. Model download manager. Tests with fixture WAVs.
-- [ ] **M3 Notes**: TipTap editor beside the live transcript; meeting record saved to encrypted SQLite.
-- [ ] **M4 AI notes**: "Enhance" merges your notes + transcript through a template; streaming output; 4 built-in templates (general, 1:1, sales call, standup) plus custom. Ollama default, BYO cloud keys.
+- [x] **M3 Notes**: TipTap editor beside the live transcript; meeting record saved to encrypted SQLite.
+- [x] **M4 AI notes**: "Enhance" merges your notes + transcript through a template; streaming output; 4 built-in templates (general, 1:1, sales call, standup) plus custom. Ollama default, BYO cloud keys.
 - [ ] **M5 Library**: meeting list, full-text search, ask-across-meetings chat, Markdown/PDF export, copy to clipboard.
 - [ ] **M6 Detection + polish**: meeting detection notification, menu-bar item, global hotkey, onboarding, branding (icon, colors, name).
 - [ ] **M7 Release**: Developer ID signing, notarization, DMG, signed auto-updater on GitHub Releases, landing README, privacy policy.
@@ -102,7 +102,7 @@ Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integ
 - Tests: 47 Rust (incl. end-to-end streaming against a local WebSocket server: chunking, auth header, final on finish, provider error, connection refused; parser tests for both providers) + 14 Vitest.
 - Live check: with Deepgram selected and no key, Start shows "Add your Deepgram API key in Settings…"; the Settings key field renders as designed. Not checked: a real Deepgram or AssemblyAI session (needs your API key).
 
-### M3 notes + encrypted storage (2026-10-21, in review)
+### M3 notes + encrypted storage (2026-10-21)
 
 - `store` module: SQLCipher via rusqlite `bundled-sqlcipher` (CommonCrypto on macOS, no OpenSSL). Raw 256-bit key generated with `getrandom` on first launch and kept in the Keychain (`database-key`); Parley refuses to mint a new key if a database already exists. WAL mode, foreign keys, `user_version` migrations.
 - Schema v1: `meetings` (title, start, duration, notes JSON + plain text, updated) and `transcript_lines` (speaker, segment, times, text).
@@ -110,4 +110,16 @@ Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integ
 - TipTap 3.32 editor: title + rich-text notes beside the transcript, autosaved 800 ms after the last edit; saves never overlap and flush on unmount.
 - Tests: 53 Rust (incl. encryption at rest: no SQLite header and note text absent from db + WAL bytes; wrong key rejected; transcript replace) + 19 Vitest (incl. autosaver timing).
 - Verified on this Mac: first launch created the Keychain key and an encrypted `parley.db` (random header bytes).
-- Not verified yet: typing notes in the running app and WAV deletion after Stop. Screen capture failed ("audio/video capture failure") so the UI couldn't be driven.
+- In-app check (after re-granting permissions for the new build): typed notes autosaved ("Saved"), the played sentence came back from the database as one "Them" line with no echo duplicate, both recordings kept only their .log files (WAVs deleted), and the db + WAL bytes contain neither the notes ("Priya", "Budget review") nor the transcript ("revenue numbers").
+
+### M4 AI-enhanced notes (2026-10-21)
+
+- Templates: General meeting, 1:1, Sales call, Standup, plus custom templates (create, copy a built-in, edit, delete) stored in the encrypted database. Built-ins are read-only.
+- Prompt: the user's notes are the outline and the transcript supplies detail; nothing invented; empty sections omitted. Transcript lines carry time and speaker; long transcripts keep the first 40% and last 60% of the budget with an omission marker. Budgets: 24k chars for Ollama, 200k OpenAI-compatible, 600k Anthropic.
+- Providers (all streaming): Ollama `/api/chat` (default, local), OpenAI-compatible `/chat/completions`, Anthropic Messages API (raw HTTPS since Rust has no official SDK; `claude-opus-5-5`, effort medium, 64k max_tokens, server-side refusal fallbacks via `fallbacks: "default"` + `server-side-fallback-2026-07-01`). Keys for OpenAI and Anthropic live in the Keychain.
+- `enhance_meeting` streams `enhance-delta` events, saves Markdown to the meeting (migration v2, upgrades v1 in place), supports cancel. Output is rendered with marked and sanitized with DOMPurify.
+- Fixes found during testing: the database key read moved off the main thread (a pending Keychain prompt left the window blank); Settings no longer unmounts an in-progress recording; header labels no longer wrap.
+- Tests: 70 Rust (incl. end-to-end streaming for all three providers against a local fake HTTP server, request headers and body checked; v1 to v2 migration) + 21 Vitest.
+- Live check with a local fake Ollama server: recorded a meeting, typed notes, clicked Enhance; text streamed into the Enhanced tab as rendered Markdown and was saved. The captured request held the edited title, the template, the flushed notes and the timestamped transcript line. Custom template create and delete worked in Settings.
+- Not checked live: real Ollama, OpenAI or Anthropic responses (no local model or keys on this Mac).
+- Dev signing: a local "Parley Dev" identity keeps microphone and system-audio permission across rebuilds (mic ready in 560 ms after two signed rebuilds, no prompt). The Keychain still asked once per rebuild during testing; choose Always Allow.
