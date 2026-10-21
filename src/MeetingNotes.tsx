@@ -12,11 +12,12 @@ interface Props {
   enhancedTemplateId: string;
   /** Enhance needs the finished transcript, so it is only offered after recording stops. */
   canEnhance: boolean;
+  onSaved?: () => void;
 }
 
 type Tab = "mine" | "enhanced";
 
-export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhancedTemplateId, canEnhance }: Props) {
+export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhancedTemplateId, canEnhance, onSaved }: Props) {
   const [tab, setTab] = useState<Tab>(enhancedMd ? "enhanced" : "mine");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState(enhancedTemplateId || "general");
@@ -24,12 +25,16 @@ export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhanced
   const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const flushNotes = useRef<() => Promise<void>>(async () => {});
+  // A fast double click lands before React re-renders, so guard with a ref, not state.
+  const inFlight = useRef(false);
 
   useEffect(() => {
     listTemplates().then(setTemplates).catch(() => setTemplates([]));
   }, []);
 
   const enhance = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setError(null);
     setTab("enhanced");
     setStreaming("");
@@ -41,12 +46,14 @@ export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhanced
     try {
       const meeting = await enhanceMeeting(meetingId, templateId);
       setEnhanced(meeting.enhancedMd);
+      onSaved?.();
     } catch (e) {
       const message = String(e);
       if (message !== "cancelled") setError(missingKeyMessage(message) ?? message);
     } finally {
       unlisten();
       setStreaming(null);
+      inFlight.current = false;
     }
   };
 
@@ -92,6 +99,7 @@ export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhanced
           initialTitle={title}
           initialJson={notesJson}
           onFlushReady={(flush) => (flushNotes.current = flush)}
+          onSaved={onSaved}
         />
       </div>
       {tab === "enhanced" && (

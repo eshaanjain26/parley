@@ -1,6 +1,8 @@
+mod ask;
 mod capture;
 mod dsp;
 mod enhance;
+mod export;
 mod llm;
 mod secrets;
 mod settings;
@@ -333,6 +335,177 @@ fn list_templates_from(store: &Store) -> Result<Vec<enhance::Template>, String> 
 }
 
 #[tauri::command]
+fn list_meetings(
+    store: State<'_, StoreState>,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<store::MeetingSummary>, String> {
+    store.get()?.list_meetings(limit, offset)
+}
+
+#[tauri::command]
+fn search_meetings(
+    store: State<'_, StoreState>,
+    query: String,
+) -> Result<Vec<store::MeetingSummary>, String> {
+    store.get()?.search(&query, false, 50)
+}
+
+/// Deletes a meeting from the database and removes its recording folder (logs, and audio if
+/// it was kept).
+#[tauri::command]
+fn delete_meeting(
+    app: tauri::AppHandle,
+    store: State<'_, StoreState>,
+    recorder: State<'_, RecorderState>,
+    id: String,
+) -> Result<(), String> {
+    if let Some(active) = recorder.0.lock().map_err(|e| e.to_string())?.as_ref()
+        && active.id == id
+    {
+        return Err("Stop the recording before deleting this meeting.".into());
+    }
+    store.get()?.delete_meeting(&id)?;
+    // Meeting ids are digits (a start timestamp); never build a path from anything else.
+    if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) {
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .join("recordings")
+            .join(&id);
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Answer {
+    answer: String,
+    sources: Vec<ask::Source>,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct AskDelta {
+    text: String,
+}
+
+const ASK_MEETINGS: u32 = 6;
+
+/// Answers a question from past meetings, streaming `ask-delta` events. Shares the AI slot with
+/// Enhance, so only one request runs at a time.
+#[tauri::command]
+async fn ask_meetings(
+    app: tauri::AppHandle,
+    store: State<'_, StoreState>,
+    running: State<'_, EnhanceState>,
+    question: String,
+    utc_offset_minutes: i32,
+) -> Result<Answer, String> {
+    let store = store.get()?;
+    if question.trim().is_empty() {
+        return Err("Type a question first.".into());
+    }
+    let mut hits = store.search(&ask::keywords(&question).join(" "), true, ASK_MEETINGS)?;
+    if hits.is_empty() {
+        // Nothing matched any word: give the model the most recent meetings to work from.
+        hits = store.list_meetings(ASK_MEETINGS, 0)?;
+    }
+    let meetings: Vec<store::Meeting> = hits
+        .iter()
+        .filter_map(|h| store.get_meeting(&h.id).ok().flatten())
+        .collect();
+    let settings = settings::load(&settings_path(&app)?).map_err(|e| e.to_string())?;
+    let provider = llm_provider(&settings)?;
+    let (prompt, sources) = ask::build_prompt(
+        &question,
+        &meetings,
+        utc_offset_minutes,
+        provider.transcript_budget_chars(),
+    );
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut slot = running.0.lock().map_err(|e| e.to_string())?;
+        if slot.is_some() {
+            return Err("Another AI request is still running".into());
+        }
+        *slot = Some(cancel.clone());
+    }
+    let emitter = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        llm::stream(
+            &provider,
+            &prompt.system,
+            &prompt.user,
+            |text| {
+                let _ = emitter.emit(
+                    "ask-delta",
+                    AskDelta {
+                        text: text.to_string(),
+                    },
+                );
+            },
+            &cancel,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string());
+    *running.0.lock().map_err(|e| e.to_string())? = None;
+    Ok(Answer {
+        answer: result??.trim().to_string(),
+        sources,
+    })
+}
+
+/// Saves a meeting as Markdown through the system Save dialog. Returns the path, or `None` if
+/// the user cancelled.
+#[tauri::command]
+async fn export_markdown(
+    app: tauri::AppHandle,
+    store: State<'_, StoreState>,
+    id: String,
+    utc_offset_minutes: i32,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let meeting = store.get()?.get_meeting(&id)?.ok_or("meeting not found")?;
+    let markdown = export::meeting_markdown(&meeting, utc_offset_minutes);
+    let Some(target) = app
+        .dialog()
+        .file()
+        .set_title("Export meeting as Markdown")
+        .set_file_name(format!("{}.md", export::file_stem(&meeting.title)))
+        .add_filter("Markdown", &["md"])
+        .blocking_save_file()
+    else {
+        return Ok(None);
+    };
+    let path = target.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, markdown).map_err(|e| format!("couldn't write {path:?}: {e}"))?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// The meeting as Markdown, for the in-app print (PDF) view.
+#[tauri::command]
+fn meeting_markdown(
+    store: State<'_, StoreState>,
+    id: String,
+    utc_offset_minutes: i32,
+) -> Result<String, String> {
+    let meeting = store.get()?.get_meeting(&id)?.ok_or("meeting not found")?;
+    Ok(export::meeting_markdown(&meeting, utc_offset_minutes))
+}
+
+/// Opens the macOS print sheet for the current page, where "Save as PDF" lives.
+#[tauri::command]
+fn print_page(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn cancel_enhance(running: State<'_, EnhanceState>) -> Result<(), String> {
     if let Some(flag) = running.0.lock().map_err(|e| e.to_string())?.as_ref() {
         flag.store(true, Ordering::Relaxed);
@@ -619,6 +792,7 @@ async fn stop_recording(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(StoreState::default())
         .setup(|app| {
             // Reading the database key can wait on a macOS Keychain prompt. Off the main thread,
@@ -629,7 +803,12 @@ pub fn run() {
                 if let Err(e) = &opened {
                     eprintln!("could not open the meeting database: {e}");
                 }
+                let ok = opened.is_ok();
                 let _ = handle.state::<StoreState>().0.set(opened);
+                if ok {
+                    // Views that loaded while the database was still locked reload on this.
+                    let _ = handle.emit("store-ready", ());
+                }
             });
             Ok(())
         })
@@ -652,6 +831,13 @@ pub fn run() {
             delete_template,
             enhance_meeting,
             cancel_enhance,
+            list_meetings,
+            search_meetings,
+            delete_meeting,
+            ask_meetings,
+            export_markdown,
+            meeting_markdown,
+            print_page,
             get_meeting,
             save_notes,
             start_recording,
