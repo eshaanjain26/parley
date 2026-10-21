@@ -124,7 +124,7 @@ export function Recorder({ onStarted, onFinished }: RecorderProps) {
           <ModelDownload model={missingModel} onDone={() => setMissingModel(null)} />
         ) : (
           <div className="empty">
-            <h1>No meetings yet</h1>
+            <h1>Start a new meeting</h1>
             <p>
               Parley records your mic and the call audio on this Mac, writes a live transcript, and keeps your notes next to it, all
               encrypted on this Mac.

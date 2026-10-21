@@ -164,16 +164,17 @@ function MeetingDetail({ id, onChanged, onDeleted }: { id: string; onChanged: ()
       .catch((e) => setError(String(e)));
   }, [id]);
 
-  // Once the print view has rendered, open the print sheet (Save as PDF lives there).
+  // Once the print view has rendered, open the print sheet (Save as PDF lives there). The
+  // print document stays mounted (it's hidden on screen): the sheet renders its preview after
+  // the print call returns, so removing it here would print a blank page.
+  const [printRequest, setPrintRequest] = useState(0);
   useEffect(() => {
-    if (printHtml === null) return;
+    if (printRequest === 0) return;
     const frame = requestAnimationFrame(() => {
-      printPage()
-        .catch((e) => setStatus(`Couldn't open the print sheet: ${e}`))
-        .finally(() => setPrintHtml(null));
+      printPage().catch((e) => setStatus(`Couldn't open the print sheet: ${e}`));
     });
     return () => cancelAnimationFrame(frame);
-  }, [printHtml]);
+  }, [printRequest]);
 
   if (error) return <p className="error" role="alert">{error}</p>;
   if (!meeting) return <p className="status">Loading…</p>;
@@ -190,6 +191,7 @@ function MeetingDetail({ id, onChanged, onDeleted }: { id: string; onChanged: ()
   const savePdf = async () => {
     try {
       setPrintHtml(renderMarkdown(await meetingMarkdown(id)));
+      setPrintRequest((n) => n + 1);
     } catch (e) {
       setStatus(`Couldn't prepare the PDF: ${e}`);
     }

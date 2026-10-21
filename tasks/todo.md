@@ -33,7 +33,7 @@ Rust core
 - [x] **M2 Live transcript**: whisper.cpp local streaming with partials, then Deepgram and AssemblyAI behind the same trait. Model download manager. Tests with fixture WAVs.
 - [x] **M3 Notes**: TipTap editor beside the live transcript; meeting record saved to encrypted SQLite.
 - [x] **M4 AI notes**: "Enhance" merges your notes + transcript through a template; streaming output; 4 built-in templates (general, 1:1, sales call, standup) plus custom. Ollama default, BYO cloud keys.
-- [ ] **M5 Library**: meeting list, full-text search, ask-across-meetings chat, Markdown/PDF export, copy to clipboard.
+- [x] **M5 Library**: meeting list, full-text search, ask-across-meetings chat, Markdown/PDF export, copy to clipboard.
 - [ ] **M6 Detection + polish**: meeting detection notification, menu-bar item, global hotkey, onboarding, branding (icon, colors, name).
 - [ ] **M7 Release**: Developer ID signing, notarization, DMG, signed auto-updater on GitHub Releases, landing README, privacy policy.
 
@@ -123,3 +123,15 @@ Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integ
 - Live check with a local fake Ollama server: recorded a meeting, typed notes, clicked Enhance; text streamed into the Enhanced tab as rendered Markdown and was saved. The captured request held the edited title, the template, the flushed notes and the timestamped transcript line. Custom template create and delete worked in Settings.
 - Not checked live: real Ollama, OpenAI or Anthropic responses (no local model or keys on this Mac).
 - Dev signing: a local "Parley Dev" identity keeps microphone and system-audio permission across rebuilds (mic ready in 560 ms after two signed rebuilds, no prompt). The Keychain still asked once per rebuild during testing; choose Always Allow.
+
+### M5 library, search, ask, export (2026-10-21)
+
+- Store migration v3: FTS5 index (bundled SQLCipher has FTS5) over title, notes, enhanced notes and transcript, rebuilt per meeting on every write and backfilled for existing meetings. User input becomes quoted prefix terms, so operators and punctuation can't break a query. bm25 ranking weights title over notes over enhanced over transcript. Snippets carry highlight markers.
+- Library: searchable meeting list (newest first, "Recording now" row, Enhanced badge) beside the recorder or a meeting's detail view. Stopping a recording opens the saved meeting in the detail view, so only one editor ever autosaves a meeting. Two-step delete removes the database rows, search entry and recording folder.
+- Ask: keywords minus stopwords, any-term search with a recency fallback, up to 6 meetings; per meeting the enhanced notes (or the user's notes) plus transcript lines that mention a keyword with one line of context; numbered citations; streaming answer with clickable sources.
+- Export: TipTap JSON to Markdown (headings, nested lists, task lists, marks, links, quotes, code), saved through the native Save dialog (tauri-plugin-dialog 2.8.3). PDF: a print-only document rendered outside the app shell, then the macOS print sheet's Save as PDF.
+- Fixes from live testing: views reload on a `store-ready` event once the database unlocks; ref guards stop double clicks from sending Ask or Enhance twice; detail header shows the title; transcript stacks under notes in narrow panes; search box has no autocorrect; the print document stays mounted because the print sheet renders its preview after the print call returns (it printed a blank page before).
+- Tests: 85 Rust (FTS search, safe queries, index upkeep, delete, v3 migration, ask prompt and retrieval helpers, local dates, Markdown export) + 27 Vitest.
+- Live check (signed build): list loads after unlock; "priya" finds the two meetings with highlighted snippets; detail view and narrow layout; Save dialog opens with the title as file name (cancelled, Documents is iCloud-synced); PDF preview shows title, date, notes, enhanced notes and transcript with no app UI; Ask over a local fake Ollama streamed an answer citing the two budget meetings, and the captured prompt held numbered meeting blocks with local dates and matching transcript lines; recording, stop, and two-step delete removed the meeting and its folder.
+- Not checked live: a real LLM answer for Ask (no local model or key); a completed Markdown file save through the dialog.
+- Keychain note: with the self-signed dev identity the Keychain still asks once per rebuild; mic and system-audio permission persist.
