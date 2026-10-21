@@ -63,7 +63,59 @@ const MIGRATIONS: &[&str] = &[
         instructions TEXT NOT NULL,
         updated_at_ms INTEGER NOT NULL
     );",
+    // v3: full-text search over every meeting's title, notes, enhanced notes and transcript
+    "CREATE VIRTUAL TABLE meeting_fts USING fts5(
+        meeting_id UNINDEXED, title, notes, enhanced, transcript,
+        tokenize = 'unicode61 remove_diacritics 2'
+    );
+    INSERT INTO meeting_fts (meeting_id, title, notes, enhanced, transcript)
+        SELECT m.id, m.title, m.notes_text, m.enhanced_md,
+               coalesce((SELECT group_concat(t.text, ' ') FROM transcript_lines t WHERE t.meeting_id = m.id), '')
+        FROM meetings m;",
 ];
+
+/// Rebuilds one meeting's search row from its current data. Called after every write.
+fn refresh_fts(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM meeting_fts WHERE meeting_id = ?1", params![id])?;
+    conn.execute(
+        "INSERT INTO meeting_fts (meeting_id, title, notes, enhanced, transcript)
+         SELECT m.id, m.title, m.notes_text, m.enhanced_md,
+                coalesce((SELECT group_concat(t.text, ' ') FROM transcript_lines t WHERE t.meeting_id = m.id), '')
+         FROM meetings m WHERE m.id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
+/// Turns free text into a safe FTS5 query: each word becomes a quoted prefix term, so
+/// operators or quotes typed by the user can't produce a syntax error.
+pub fn fts_query(input: &str, any_term: bool) -> Option<String> {
+    let terms: Vec<String> = input
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| format!("\"{}\"*", w.to_lowercase()))
+        .collect();
+    if terms.is_empty() {
+        return None;
+    }
+    Some(terms.join(if any_term { " OR " } else { " AND " }))
+}
+
+/// Marks a search snippet's matched text: \u{1} opens a highlight, \u{2} closes it.
+pub const HIGHLIGHT_START: char = '\u{1}';
+pub const HIGHLIGHT_END: char = '\u{2}';
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingSummary {
+    pub id: String,
+    pub title: String,
+    pub started_at_ms: i64,
+    pub duration_secs: Option<f64>,
+    pub has_enhanced: bool,
+    /// For search results: the best-matching passage with highlight markers.
+    pub snippet: Option<String>,
+}
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -135,7 +187,7 @@ impl Store {
             params![id, title, started_at_ms],
         )
         .map_err(|e| e.to_string())?;
-        Ok(())
+        refresh_fts(&conn, id).map_err(|e| e.to_string())
     }
 
     pub fn save_notes(
@@ -157,7 +209,7 @@ impl Store {
         if changed == 0 {
             return Err(format!("meeting {id} not found"));
         }
-        Ok(())
+        refresh_fts(&conn, id).map_err(|e| e.to_string())
     }
 
     /// Records the duration and replaces the transcript in one transaction.
@@ -199,6 +251,7 @@ impl Store {
                     .map_err(|e| e.to_string())?;
             }
         }
+        refresh_fts(&tx, id).map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())
     }
 
@@ -279,6 +332,77 @@ impl Store {
         if changed == 0 {
             return Err(format!("meeting {id} not found"));
         }
+        refresh_fts(&conn, id).map_err(|e| e.to_string())
+    }
+
+    /// Most recent first.
+    pub fn list_meetings(&self, limit: u32, offset: u32) -> Result<Vec<MeetingSummary>, String> {
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, title, started_at_ms, duration_secs, enhanced_md != ''
+                 FROM meetings ORDER BY started_at_ms DESC LIMIT ?1 OFFSET ?2",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![limit, offset], |r| {
+                Ok(MeetingSummary {
+                    id: r.get(0)?,
+                    title: r.get(1)?,
+                    started_at_ms: r.get(2)?,
+                    duration_secs: r.get(3)?,
+                    has_enhanced: r.get(4)?,
+                    snippet: None,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    }
+
+    /// Ranked full-text search. `any_term` matches meetings with any of the words (for
+    /// finding context to answer a question) instead of all of them (the search box).
+    pub fn search(
+        &self,
+        query: &str,
+        any_term: bool,
+        limit: u32,
+    ) -> Result<Vec<MeetingSummary>, String> {
+        let Some(fts) = fts_query(query, any_term) else {
+            return Ok(Vec::new());
+        };
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT m.id, m.title, m.started_at_ms, m.duration_secs, m.enhanced_md != '',
+                        snippet(meeting_fts, -1, '{HIGHLIGHT_START}', '{HIGHLIGHT_END}', '…', 14)
+                 FROM meeting_fts JOIN meetings m ON m.id = meeting_fts.meeting_id
+                 WHERE meeting_fts MATCH ?1
+                 ORDER BY bm25(meeting_fts, 0.0, 5.0, 3.0, 2.0, 1.0)
+                 LIMIT ?2"
+            ))
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![fts, limit], |r| {
+                Ok(MeetingSummary {
+                    id: r.get(0)?,
+                    title: r.get(1)?,
+                    started_at_ms: r.get(2)?,
+                    duration_secs: r.get(3)?,
+                    has_enhanced: r.get(4)?,
+                    snippet: Some(r.get(5)?),
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    }
+
+    /// Removes a meeting with its notes, transcript and search entry.
+    pub fn delete_meeting(&self, id: &str) -> Result<(), String> {
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM meetings WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM meeting_fts WHERE meeting_id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -528,6 +652,125 @@ mod tests {
         assert_eq!(m.notes_text, "kept");
         assert_eq!(m.enhanced_md, "");
         assert!(store.custom_templates().unwrap().is_empty());
+    }
+
+    fn seeded() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("parley.db"), &KEY).unwrap();
+        store.create_meeting("a", "Q3 budget sync", 1_000).unwrap();
+        store
+            .save_notes("a", "Q3 budget sync", "", "Priya owns the forecast", 2)
+            .unwrap();
+        store
+            .finish_meeting(
+                "a",
+                60.0,
+                &[line(
+                    Speaker::Them,
+                    0,
+                    0,
+                    "Revenue numbers are due Thursday.",
+                )],
+            )
+            .unwrap();
+        store.create_meeting("b", "Hiring standup", 5_000).unwrap();
+        store
+            .finish_meeting(
+                "b",
+                30.0,
+                &[line(Speaker::Me, 0, 0, "We closed two backend roles.")],
+            )
+            .unwrap();
+        store
+            .save_enhanced("b", "## Decisions\n- Pause frontend hiring", "standup", 6)
+            .unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn list_is_newest_first_and_flags_enhanced() {
+        let (_d, store) = seeded();
+        let list = store.list_meetings(10, 0).unwrap();
+        let ids: Vec<&str> = list.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["b", "a"]);
+        assert!(list[0].has_enhanced && !list[1].has_enhanced);
+        assert_eq!(store.list_meetings(1, 1).unwrap()[0].id, "a");
+    }
+
+    #[test]
+    fn search_covers_notes_transcript_and_enhanced_with_highlights() {
+        let (_d, store) = seeded();
+        let by_note = store.search("priya", false, 10).unwrap();
+        assert_eq!(by_note.len(), 1);
+        assert_eq!(by_note[0].id, "a");
+        assert!(
+            by_note[0]
+                .snippet
+                .as_deref()
+                .unwrap()
+                .contains("\u{1}Priya\u{2}")
+        );
+        assert_eq!(
+            store.search("revenue thursday", false, 10).unwrap()[0].id,
+            "a"
+        );
+        assert_eq!(store.search("frontend", false, 10).unwrap()[0].id, "b");
+        // Prefix matching: "forec" finds "forecast".
+        assert_eq!(store.search("forec", false, 10).unwrap().len(), 1);
+        // All words must match by default; any_term widens it.
+        assert!(store.search("priya backend", false, 10).unwrap().is_empty());
+        assert_eq!(store.search("priya backend", true, 10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn search_survives_operators_and_punctuation() {
+        let (_d, store) = seeded();
+        for q in ["\"", "AND OR NOT", "budget*", "(q3", "-", "NEAR(", ""] {
+            assert!(store.search(q, false, 10).is_ok(), "{q:?}");
+        }
+        assert_eq!(
+            fts_query("Q3 budget!", false).unwrap(),
+            "\"q3\"* AND \"budget\"*"
+        );
+        assert_eq!(fts_query("  ?! ", false), None);
+    }
+
+    #[test]
+    fn edits_keep_the_index_current_and_delete_removes_everything() {
+        let (_d, store) = seeded();
+        store
+            .save_notes("a", "Q3 budget sync", "", "Marco owns it now", 3)
+            .unwrap();
+        assert!(store.search("priya", false, 10).unwrap().is_empty());
+        assert_eq!(store.search("marco", false, 10).unwrap().len(), 1);
+        store.delete_meeting("a").unwrap();
+        assert!(store.get_meeting("a").unwrap().is_none());
+        assert!(store.search("revenue", false, 10).unwrap().is_empty());
+        assert_eq!(store.list_meetings(10, 0).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migration_v3_indexes_meetings_that_already_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("parley.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";", hex(&KEY)))
+                .unwrap();
+            conn.execute_batch(&format!(
+                "BEGIN; {}; {}; PRAGMA user_version = 2; COMMIT;",
+                MIGRATIONS[0], MIGRATIONS[1]
+            ))
+            .unwrap();
+            conn.execute(
+                "INSERT INTO meetings (id, title, started_at_ms, notes_text, updated_at_ms)
+                 VALUES ('old', 'Vendor review', 1, 'renewal pricing', 1)",
+                [],
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path, &KEY).unwrap();
+        assert_eq!(store.search("renewal", false, 10).unwrap()[0].id, "old");
     }
 
     #[test]

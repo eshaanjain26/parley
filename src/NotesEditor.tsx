@@ -10,15 +10,19 @@ interface Props {
   initialJson: string;
   /** Receives a function that saves any pending edit immediately. */
   onFlushReady?: (flush: () => Promise<void>) => void;
+  /** Called after each successful save (e.g. to refresh the meeting list's title). */
+  onSaved?: () => void;
 }
 
 type SaveState = "saved" | "saving" | "error";
 
 /** Title plus rich-text notes, autosaved to the encrypted store 800 ms after the last edit. */
-export function NotesEditor({ meetingId, initialTitle, initialJson, onFlushReady }: Props) {
+export function NotesEditor({ meetingId, initialTitle, initialJson, onFlushReady, onSaved }: Props) {
   const [title, setTitle] = useState(initialTitle);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const titleRef = useRef(initialTitle);
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
 
   const saver = useMemo(
     () =>
@@ -27,6 +31,7 @@ export function NotesEditor({ meetingId, initialTitle, initialJson, onFlushReady
           setSaveState("saving");
           await saveNotes(meetingId, update);
           setSaveState("saved");
+          onSavedRef.current?.();
         },
         800,
         () => setSaveState("error"),

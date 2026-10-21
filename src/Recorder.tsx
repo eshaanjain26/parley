@@ -37,7 +37,14 @@ interface OpenMeeting {
   notesJson: string;
 }
 
-export function Recorder() {
+interface RecorderProps {
+  /** A new meeting row exists (recording started). */
+  onStarted?: (meetingId: string) => void;
+  /** Recording stopped and the meeting was saved; the parent opens it. */
+  onFinished?: (meetingId: string) => void;
+}
+
+export function Recorder({ onStarted, onFinished }: RecorderProps) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [levels, setLevels] = useState<AudioLevels>(SILENT);
   const [lines, setLines] = useState<TranscriptLine[]>([]);
@@ -77,6 +84,7 @@ export function Recorder() {
       setWarning(notes.length ? notes.join(" ") : null);
       setOpen({ id: started.id, title, notesJson: "" });
       setPhase("recording");
+      onStarted?.(started.id);
     } catch (e) {
       const message = String(e);
       const keyMessage = missingKeyMessage(message);
@@ -97,8 +105,12 @@ export function Recorder() {
     setPhase("stopping");
     try {
       const meeting = await stopRecording();
-      setFinished(meeting);
-      setLines(meeting.transcript);
+      // The finished meeting opens in the library's detail view, so this view resets. Keeping
+      // its editor mounted too would mean two autosaving editors on one meeting.
+      setOpen(null);
+      setFinished(null);
+      setLines([]);
+      onFinished?.(meeting.id);
     } catch (e) {
       setError(String(e));
     }
@@ -112,7 +124,7 @@ export function Recorder() {
           <ModelDownload model={missingModel} onDone={() => setMissingModel(null)} />
         ) : (
           <div className="empty">
-            <h1>No meetings yet</h1>
+            <h1>Start a new meeting</h1>
             <p>
               Parley records your mic and the call audio on this Mac, writes a live transcript, and keeps your notes next to it, all
               encrypted on this Mac.
@@ -185,7 +197,7 @@ export function Recorder() {
   );
 }
 
-function Transcript({ lines, live }: { lines: TranscriptLine[]; live?: boolean }) {
+export function Transcript({ lines, live }: { lines: TranscriptLine[]; live?: boolean }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (live) end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
