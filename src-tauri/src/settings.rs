@@ -34,6 +34,12 @@ pub struct Settings {
     /// Keep each meeting's WAV files after transcription. Off by default: the encrypted
     /// transcript is the record, and raw audio is the most sensitive thing Parley handles.
     pub keep_audio: bool,
+    /// Notify when a meeting app starts using the microphone.
+    pub detect_meetings: bool,
+    /// ⌥⇧⌘R starts and stops recording from any app.
+    pub hotkey_enabled: bool,
+    /// First-run setup has been completed or skipped.
+    pub onboarded: bool,
 }
 
 impl Default for Settings {
@@ -49,6 +55,9 @@ impl Default for Settings {
             openai_model: String::new(),
             anthropic_model: crate::llm::DEFAULT_ANTHROPIC_MODEL.into(),
             keep_audio: false,
+            detect_meetings: true,
+            hotkey_enabled: true,
+            onboarded: false,
         }
     }
 }

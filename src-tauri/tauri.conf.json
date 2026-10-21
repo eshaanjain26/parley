@@ -46,7 +46,8 @@
     },
     "externalBin": [
       "binaries/parley-audiotap",
-      "binaries/parley-mic"
+      "binaries/parley-mic",
+      "binaries/parley-micwatch"
     ]
   }
 }

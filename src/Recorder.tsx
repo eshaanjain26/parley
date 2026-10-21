@@ -4,6 +4,7 @@ import {
   dbToPercent,
   formatDuration,
   onAudioLevels,
+  onToggleRecording,
   startRecording,
   stopRecording,
 } from "./lib/recording";
@@ -117,6 +118,19 @@ export function Recorder({ onStarted, onFinished }: RecorderProps) {
     setPhase("idle");
   };
 
+  // The menu bar and the global hotkey ask the UI to toggle, so they share this exact flow.
+  const toggle = useRef<() => void>(() => {});
+  toggle.current = () => {
+    if (phase === "recording") void stop();
+    else if (phase === "idle") void start();
+  };
+  useEffect(() => {
+    const sub = onToggleRecording(() => toggle.current());
+    return () => {
+      sub.then((fn) => fn());
+    };
+  }, []);
+
   if (!open) {
     return (
       <section className="recorder-idle">
@@ -222,7 +236,7 @@ export function Transcript({ lines, live }: { lines: TranscriptLine[]; live?: bo
   );
 }
 
-function ModelDownload({ model, onDone }: { model: ModelStatus; onDone: () => void }) {
+export function ModelDownload({ model, onDone }: { model: ModelStatus; onDone: () => void }) {
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const downloading = progress !== null && !error;

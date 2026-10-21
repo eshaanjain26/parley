@@ -3,7 +3,8 @@ import "./App.css";
 import { AskView } from "./AskView";
 import { Library } from "./Library";
 import { SettingsView } from "./SettingsView";
-import { AppInfo, getAppInfo } from "./lib/settings";
+import { Onboarding } from "./Onboarding";
+import { AppInfo, Settings, getAppInfo, getSettings } from "./lib/settings";
 
 type View = "meetings" | "ask" | "settings";
 
@@ -17,15 +18,21 @@ function App() {
   const [view, setView] = useState<View>("meetings");
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [openRequest, setOpenRequest] = useState<{ id: string; nonce: number } | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
 
   useEffect(() => {
     getAppInfo().then(setInfo).catch(() => setInfo(null));
+    getSettings().then(setSettings).catch(() => setSettings(null));
   }, []);
 
   const openMeeting = (id: string) => {
     setOpenRequest({ id, nonce: Date.now() });
     setView("meetings");
   };
+
+  if (settings && !settings.onboarded) {
+    return <Onboarding settings={settings} hotkey={info?.hotkey ?? "⌥⇧⌘R"} onDone={setSettings} />;
+  }
 
   return (
     <div className="shell">

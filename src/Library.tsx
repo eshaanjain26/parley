@@ -17,6 +17,8 @@ import {
   splitSnippet,
 } from "./lib/library";
 import { Meeting, getMeeting } from "./lib/meetings";
+import { requestToggleRecording } from "./lib/recording";
+import { MeetingDetected, onMeetingDetected } from "./lib/library";
 
 /** What the right-hand pane shows. */
 type Pane = { kind: "recorder" } | { kind: "meeting"; id: string };
@@ -33,6 +35,14 @@ export function Library({ openRequest }: Props) {
   const [pane, setPane] = useState<Pane>({ kind: "recorder" });
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [detected, setDetected] = useState<MeetingDetected | null>(null);
+
+  useEffect(() => {
+    const sub = onMeetingDetected(setDetected);
+    return () => {
+      sub.then((fn) => fn());
+    };
+  }, []);
 
   const refresh = useCallback(() => {
     listMeetings()
@@ -89,6 +99,26 @@ export function Library({ openRequest }: Props) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        {detected && !recordingId && (
+          <div className="detected" role="status">
+            <p>
+              <strong>{detected.appName}</strong> is using your microphone. Taking notes?
+            </p>
+            <div className="actions">
+              <button
+                className="primary"
+                onClick={() => {
+                  setDetected(null);
+                  setPane({ kind: "recorder" });
+                  requestToggleRecording();
+                }}
+              >
+                Start recording
+              </button>
+              <button onClick={() => setDetected(null)}>Not now</button>
+            </div>
+          </div>
+        )}
         {error && <p className="error" role="alert">{error}</p>}
         <ul>
           {shown.map((m) => (
@@ -120,6 +150,9 @@ export function Library({ openRequest }: Props) {
           <Recorder
             onStarted={(id) => {
               setRecordingId(id);
+              setDetected(null);
+              // Recording may have started from the menu bar or hotkey while another meeting was open.
+              setPane({ kind: "recorder" });
               refresh();
             }}
             onFinished={(id) => {
