@@ -89,15 +89,34 @@ button.primary:disabled { opacity: .45; cursor: not-allowed; }
 .error { color: #c0392b; margin-top: 16px; font-size: 13px; }
 .warning { color: var(--muted); font-size: 13px; margin: 0; }
 
-.recorder { max-width: 460px; margin: 10vh auto 0; display: flex; flex-direction: column; gap: 18px; }
+.recorder { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; height: 100%; }
+.recorder-idle { max-width: 760px; margin: 0 auto; }
+.rec-bar { display: flex; align-items: center; gap: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.rec-meters { flex: 1; display: flex; flex-direction: column; gap: 8px; }
 .rec-header { display: flex; align-items: center; gap: 10px; }
 .rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #d64545; animation: pulse 1.4s ease-in-out infinite; }
 .rec-time { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; }
 @keyframes pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
 
-.meter { display: flex; flex-direction: column; gap: 6px; }
+.meter { display: flex; align-items: center; gap: 10px; }
+.meter .meter-label { width: 130px; flex-shrink: 0; }
+.meter .meter-track { flex: 1; }
 .meter-label { font-size: 13px; color: var(--muted); }
 .meter-track { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
 .meter-fill { height: 100%; background: var(--accent); transition: width 90ms linear; }
 .meter-off .meter-label { opacity: .5; }
+
+.empty .meter-track { margin: 0 auto 8px; max-width: 320px; }
+.empty button + button, .empty .status + button { margin-left: 8px; }
+button:not(.primary) { font: inherit; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px; padding: 8px 16px; cursor: pointer; }
+
+.transcript { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; padding-bottom: 24px; }
+.recorder-idle .transcript { margin-top: 40px; border-top: 1px solid var(--border); padding-top: 24px; }
+.transcript-empty { color: var(--muted); font-size: 14px; }
+.line { display: grid; grid-template-columns: 72px 1fr; gap: 12px; }
+.line-meta { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); padding-top: 2px; }
+.line-speaker { font-weight: 600; }
+.line-me .line-speaker { color: var(--accent); }
+.line-text { line-height: 1.55; }
+.line-partial .line-text { color: var(--muted); font-style: italic; }

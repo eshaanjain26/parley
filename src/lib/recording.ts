@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import type { TranscriptLine } from "./transcript";
 
 // Mirrors the structs returned by start_recording / stop_recording and the audio-levels event in src-tauri/src/lib.rs.
 export interface RecordingStarted {
@@ -13,6 +14,7 @@ export interface RecordingFinished {
   durationSecs: number;
   micPath: string;
   systemPath: string | null;
+  transcript: TranscriptLine[];
 }
 
 export interface AudioLevels {

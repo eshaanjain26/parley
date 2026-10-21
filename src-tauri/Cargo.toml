@@ -25,6 +25,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 cpal = "0.18.2"
 hound = "3.5.1"
+whisper-rs = { version = "0.16.0", features = ["metal"] }
+ureq = "3.4.2"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
@@ -32,6 +35,10 @@ tempfile = "3"
 # Dependencies build without debug info in dev: keeps target/ small; our own crate keeps full debug info.
 [profile.dev.package."*"]
 debug = false
+
+# whisper.cpp is far too slow unoptimized for live partials, even in dev builds.
+[profile.dev.package.whisper-rs-sys]
+opt-level = 3
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

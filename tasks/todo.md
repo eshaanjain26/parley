@@ -70,3 +70,16 @@ Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integ
 - Dev note: every unsigned rebuild is a new app to macOS privacy controls, so mic and system-audio prompts reappear after each build. A stable signing identity (M7) fixes this.
 - Disk: dependency debug info is off in dev builds (`target/` went from 3.8 GB to 1.2 GB).
 - Machine note: this Mac runs at 98-99% disk with up to 5 GB of swap, which twice stopped builds with "No space left on device". M2 needs room for whisper.cpp and a model (~150 MB to 1.5 GB).
+
+### M2a local transcription (2026-10-20)
+
+- `stt` module: `SpeechToText` trait (push 16 kHz audio, get partial/final events with stable segment ids) so cloud engines slot in later.
+- Segmenter: adaptive energy VAD, 300 ms pre-roll, partial every 1.5 s, final after 700 ms pause or 20 s cap, drops sub-250 ms blips.
+- whisper.cpp engine via whisper-rs 0.16 (Metal); hallucination filter for `[BLANK_AUDIO]`-style annotations; stale partials collapsed after a backlog. whisper.cpp builds optimized even in dev.
+- Model manager: tiny/base/small English models with sizes and SHA-256 from the Hugging Face LFS pointers; streamed `.part` download, verified before rename, cancellable, progress events.
+- Recording taps feed one transcriber thread per speaker (You = mic, Them = system audio); `transcript.json` saved per recording.
+- UI: live transcript with partials in italics, in-app model download with progress, model picker in Settings.
+- Tests: 40 Rust + 1 model-backed fixture test (spoken WAV from `say`, run in CI against tiny.en) + 12 Vitest.
+- Live check: spoken sentence played through system audio appeared as a final "Them" line within the 13 s recording, matching the script word for word; `transcript.json` correct.
+- Known issue: on laptop speakers the mic hears the call, so "Them" speech is duplicated as "You". Fix: echo cancellation on the mic (macOS voice-processing I/O) — next.
+- Local machine note: `/Library/Developer/CommandLineTools/usr/include/c++/v1` is a stale 11-file leftover that hides the SDK's libc++ headers, so C++ builds fail without `CXXFLAGS="-isystem $(xcrun --show-sdk-path)/usr/include/c++/v1"`. Removing that folder (sudo) or reinstalling the Command Line Tools fixes it for good.
