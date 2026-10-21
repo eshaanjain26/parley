@@ -101,3 +101,13 @@ Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integ
 - Settings: masked key field with save/remove for the selected cloud provider; the on-device model picker hides for cloud engines. Starting without a key explains what to do.
 - Tests: 47 Rust (incl. end-to-end streaming against a local WebSocket server: chunking, auth header, final on finish, provider error, connection refused; parser tests for both providers) + 14 Vitest.
 - Live check: with Deepgram selected and no key, Start shows "Add your Deepgram API key in Settings…"; the Settings key field renders as designed. Not checked: a real Deepgram or AssemblyAI session (needs your API key).
+
+### M3 notes + encrypted storage (2026-10-21, in review)
+
+- `store` module: SQLCipher via rusqlite `bundled-sqlcipher` (CommonCrypto on macOS, no OpenSSL). Raw 256-bit key generated with `getrandom` on first launch and kept in the Keychain (`database-key`); Parley refuses to mint a new key if a database already exists. WAL mode, foreign keys, `user_version` migrations.
+- Schema v1: `meetings` (title, start, duration, notes JSON + plain text, updated) and `transcript_lines` (speaker, segment, times, text).
+- Recording now creates the meeting row on start and saves the transcript to the database on stop. `transcript.json` (plaintext) is gone, and WAVs are deleted after transcription unless Settings > "Keep audio recordings" is on (default off). Capture logs stay; they hold no content.
+- TipTap 3.32 editor: title + rich-text notes beside the transcript, autosaved 800 ms after the last edit; saves never overlap and flush on unmount.
+- Tests: 53 Rust (incl. encryption at rest: no SQLite header and note text absent from db + WAL bytes; wrong key rejected; transcript replace) + 19 Vitest (incl. autosaver timing).
+- Verified on this Mac: first launch created the Keychain key and an encrypted `parley.db` (random header bytes).
+- Not verified yet: typing notes in the running app and WAV deletion after Stop. Screen capture failed ("audio/video capture failure") so the UI couldn't be driven.

@@ -27,6 +27,9 @@ pub struct Settings {
     pub llm_provider: LlmProvider,
     pub ollama_url: String,
     pub ollama_model: String,
+    /// Keep each meeting's WAV files after transcription. Off by default: the encrypted
+    /// transcript is the record, and raw audio is the most sensitive thing Parley handles.
+    pub keep_audio: bool,
 }
 
 impl Default for Settings {
@@ -38,6 +41,7 @@ impl Default for Settings {
             llm_provider: LlmProvider::Ollama,
             ollama_url: "http://127.0.0.1:11434".into(),
             ollama_model: "llama3.2:3b".into(),
+            keep_audio: false,
         }
     }
 }
@@ -111,5 +115,6 @@ mod tests {
         assert_eq!(v["speechProvider"], "local-whisper");
         assert_eq!(v["llmProvider"], "ollama");
         assert_eq!(v["ollamaUrl"], "http://127.0.0.1:11434");
+        assert_eq!(v["keepAudio"], false);
     }
 }
