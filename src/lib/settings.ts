@@ -11,6 +11,7 @@ export interface Settings {
   llmProvider: LlmProvider;
   ollamaUrl: string;
   ollamaModel: string;
+  keepAudio: boolean;
 }
 
 export interface AppInfo {

@@ -2,16 +2,19 @@ mod capture;
 mod dsp;
 mod secrets;
 mod settings;
+mod store;
 mod stt;
 mod transcribe;
 
 use capture::{Recording, Sidecars};
 use settings::{Settings, SpeechProvider};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use store::Store;
 use stt::whisper::{WhisperEngine, WhisperModel};
 use stt::{SpeechToText, models};
 use tauri::{Emitter, Manager, State};
@@ -226,8 +229,72 @@ fn speech_engines(
     }
 }
 
+/// Opened once at startup. Holds the error instead if the database couldn't be opened, so
+/// every command can report it.
+#[derive(Default)]
+struct StoreState(OnceLock<Result<Store, String>>);
+
+impl StoreState {
+    fn get(&self) -> Result<&Store, String> {
+        match self.0.get() {
+            Some(Ok(store)) => Ok(store),
+            Some(Err(e)) => Err(e.clone()),
+            None => Err("the meeting database isn't open yet".into()),
+        }
+    }
+}
+
+const DB_KEY_ACCOUNT: &str = "database-key";
+
+fn open_store(app: &tauri::AppHandle) -> Result<Store, String> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("parley.db");
+    let key = match secrets::get(DB_KEY_ACCOUNT)? {
+        Some(hex) => store::parse_key(&hex)?,
+        // Never mint a new key for an existing database: it could not be read with it.
+        None if path.exists() => {
+            return Err("your meeting database's key is missing from the Keychain".into());
+        }
+        None => {
+            let key = store::new_key()?;
+            secrets::set(DB_KEY_ACCOUNT, &store::key_to_hex(&key))?;
+            key
+        }
+    };
+    Store::open(&path, &key)
+}
+
+#[tauri::command]
+fn get_meeting(store: State<'_, StoreState>, id: String) -> Result<Option<store::Meeting>, String> {
+    store.get()?.get_meeting(&id)
+}
+
+#[tauri::command]
+fn save_notes(
+    store: State<'_, StoreState>,
+    id: String,
+    title: String,
+    notes_json: String,
+    notes_text: String,
+) -> Result<(), String> {
+    store
+        .get()?
+        .save_notes(&id, &title, &notes_json, &notes_text, now_ms()?)
+}
+
+fn now_ms() -> Result<i64, String> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis() as i64)
+}
+
 struct ActiveRecording {
     id: String,
+    keep_audio: bool,
     recording: Recording,
     meters_running: Arc<AtomicBool>,
     transcribers: Vec<JoinHandle<Vec<TranscriptLine>>>,
@@ -257,16 +324,6 @@ struct AudioLevels {
     system_ended: bool,
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RecordingFinished {
-    id: String,
-    duration_secs: f64,
-    mic_path: String,
-    system_path: Option<String>,
-    transcript: Vec<TranscriptLine>,
-}
-
 /// The Swift sidecars are bundled next to the main executable (Contents/MacOS in the .app).
 fn sidecars() -> Result<Sidecars, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -282,7 +339,10 @@ async fn start_recording(
     app: tauri::AppHandle,
     state: State<'_, RecorderState>,
     cache: State<'_, ModelCache>,
+    store: State<'_, StoreState>,
+    title: String,
 ) -> Result<RecordingStarted, String> {
+    let store = store.get()?;
     let mut active = state.0.lock().map_err(|e| e.to_string())?;
     if active.is_some() {
         return Err("Already recording".into());
@@ -290,11 +350,8 @@ async fn start_recording(
     let settings = settings::load(&settings_path(&app)?).map_err(|e| e.to_string())?;
     let (mic_engine, system_engine) = speech_engines(&app, &settings, &cache)?;
 
-    let id = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_millis()
-        .to_string();
+    let started_at = now_ms()?;
+    let id = started_at.to_string();
     let dir = app
         .path()
         .app_data_dir()
@@ -305,6 +362,7 @@ async fn start_recording(
     let (mic_tx, mic_rx) = mpsc::channel();
     let (system_tx, system_rx) = mpsc::channel();
     let recording = Recording::start(dir, &sidecars()?, Some(mic_tx), Some(system_tx))?;
+    store.create_meeting(&id, &title, started_at)?;
 
     let line_emitter = app.clone();
     let on_line: transcribe::OnLine = Arc::new(move |line| {
@@ -356,6 +414,7 @@ async fn start_recording(
     };
     *active = Some(ActiveRecording {
         id,
+        keep_audio: settings.keep_audio,
         recording,
         meters_running,
         transcribers,
@@ -364,7 +423,11 @@ async fn start_recording(
 }
 
 #[tauri::command]
-async fn stop_recording(state: State<'_, RecorderState>) -> Result<RecordingFinished, String> {
+async fn stop_recording(
+    state: State<'_, RecorderState>,
+    store: State<'_, StoreState>,
+) -> Result<store::Meeting, String> {
+    let store = store.get()?;
     let active = state
         .0
         .lock()
@@ -372,7 +435,6 @@ async fn stop_recording(state: State<'_, RecorderState>) -> Result<RecordingFini
         .take()
         .ok_or("Not recording")?;
     active.meters_running.store(false, Ordering::Relaxed);
-    let dir = active.recording.dir.clone();
     // Stopping closes the audio taps, which lets each transcriber flush and finish.
     let done = active.recording.stop()?;
     let mut lines = active
@@ -383,20 +445,33 @@ async fn stop_recording(state: State<'_, RecorderState>) -> Result<RecordingFini
         lines.next().unwrap_or_default(),
         lines.next().unwrap_or_default(),
     );
-    let json = serde_json::to_vec_pretty(&transcript).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join("transcript.json"), json).map_err(|e| e.to_string())?;
-    Ok(RecordingFinished {
-        id: active.id,
-        duration_secs: done.duration_secs,
-        mic_path: done.mic_path.display().to_string(),
-        system_path: done.system_path.map(|p| p.display().to_string()),
-        transcript,
-    })
+    store.finish_meeting(&active.id, done.duration_secs, &transcript)?;
+    if !active.keep_audio {
+        // The capture logs stay for troubleshooting; they hold no audio or transcript text.
+        for wav in [Some(done.mic_path), done.system_path]
+            .into_iter()
+            .flatten()
+        {
+            let _ = std::fs::remove_file(wav);
+        }
+    }
+    store
+        .get_meeting(&active.id)?
+        .ok_or_else(|| "meeting disappeared after saving".into())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(StoreState::default())
+        .setup(|app| {
+            let opened = open_store(app.handle());
+            if let Err(e) = &opened {
+                eprintln!("could not open the meeting database: {e}");
+            }
+            let _ = app.state::<StoreState>().0.set(opened);
+            Ok(())
+        })
         .manage(RecorderState::default())
         .manage(ModelCache::default())
         .manage(DownloadState::default())
@@ -410,6 +485,8 @@ pub fn run() {
             set_api_key,
             delete_api_key,
             api_key_status,
+            get_meeting,
+            save_notes,
             start_recording,
             stop_recording
         ])

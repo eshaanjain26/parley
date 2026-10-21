@@ -124,3 +124,31 @@ button:not(.primary) { font: inherit; border: 1px solid var(--border); backgroun
 .key-field { margin-bottom: 12px; }
 .key-field .actions { margin-top: 0; }
 .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+
+.meeting { display: flex; flex-direction: column; gap: 12px; height: 100%; max-width: 1100px; margin: 0 auto; }
+.rec-summary { flex: 1; margin: 0; color: var(--muted); }
+.meeting-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; }
+.meeting-transcript { border-left: 1px solid var(--border); padding-left: 20px; overflow-y: auto; }
+.meeting-transcript h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 4px 0 12px; }
+.meeting-transcript .line { grid-template-columns: 1fr; gap: 2px; }
+.meeting-transcript .line-meta { flex-direction: row; gap: 8px; }
+
+.notes { display: flex; flex-direction: column; min-height: 0; }
+.notes-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.notes-title { flex: 1; font-size: 22px; font-weight: 650; border: 0; background: transparent; padding: 4px 0; }
+.notes-title:focus { outline: none; border-bottom: 1px solid var(--accent); }
+.save-state { font-size: 12px; color: var(--muted); }
+.save-error { color: #c0392b; }
+.notes-body { flex: 1; overflow-y: auto; }
+.notes-body .tiptap { min-height: 100%; outline: none; line-height: 1.6; padding-bottom: 40px; }
+.notes-body .tiptap p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--muted); float: left; height: 0; pointer-events: none; }
+.notes-body .tiptap ul, .notes-body .tiptap ol { padding-left: 22px; }
+
+@media (max-width: 860px) {
+  .meeting-body { grid-template-columns: 1fr; }
+  .meeting-transcript { border-left: 0; padding-left: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+}
+
+.panel label.check { flex-direction: row; align-items: flex-start; gap: 10px; color: var(--text); font-size: 14px; }
+.panel label.check input { margin-top: 3px; }
+.panel label.check .hint { display: block; }

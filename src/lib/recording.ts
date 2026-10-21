@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { TranscriptLine } from "./transcript";
+import type { Meeting } from "./meetings";
 
 // Mirrors the structs returned by start_recording / stop_recording and the audio-levels event in src-tauri/src/lib.rs.
 export interface RecordingStarted {
@@ -10,13 +10,6 @@ export interface RecordingStarted {
   micWarning: string | null;
 }
 
-export interface RecordingFinished {
-  id: string;
-  durationSecs: number;
-  micPath: string;
-  systemPath: string | null;
-  transcript: TranscriptLine[];
-}
 
 export interface AudioLevels {
   micDbfs: number;
@@ -26,8 +19,8 @@ export interface AudioLevels {
   systemEnded: boolean;
 }
 
-export const startRecording = () => invoke<RecordingStarted>("start_recording");
-export const stopRecording = () => invoke<RecordingFinished>("stop_recording");
+export const startRecording = (title: string) => invoke<RecordingStarted>("start_recording", { title });
+export const stopRecording = () => invoke<Meeting>("stop_recording");
 export const onAudioLevels = (cb: (l: AudioLevels) => void): Promise<UnlistenFn> =>
   listen<AudioLevels>("audio-levels", (e) => cb(e.payload));
 

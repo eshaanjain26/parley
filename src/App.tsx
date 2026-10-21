@@ -146,6 +146,13 @@ function SettingsView() {
           </select>
         </label>
       )}
+      <label className="check">
+        <input type="checkbox" checked={settings.keepAudio} onChange={(e) => set("keepAudio", e.target.checked)} />
+        <span>
+          Keep audio recordings
+          <span className="hint">Off: audio is deleted once the transcript is saved. Transcripts and notes are always encrypted.</span>
+        </span>
+      </label>
       <h2>AI notes</h2>
       <label>
         Provider

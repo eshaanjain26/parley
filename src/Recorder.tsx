@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   AudioLevels,
-  RecordingFinished,
   dbToPercent,
   formatDuration,
   onAudioLevels,
@@ -24,10 +23,19 @@ import {
   onTranscriptLine,
 } from "./lib/transcript";
 import { KEY_MISSING } from "./lib/settings";
+import { Meeting, defaultTitle } from "./lib/meetings";
+import { NotesEditor } from "./NotesEditor";
 
 type Phase = "idle" | "starting" | "recording" | "stopping";
 
 const SILENT: AudioLevels = { micDbfs: -100, systemDbfs: -100, seconds: 0, micEnded: false, systemEnded: false };
+
+/** The meeting on screen: the one being recorded, or the one that just finished. */
+interface OpenMeeting {
+  id: string;
+  title: string;
+  notesJson: string;
+}
 
 export function Recorder() {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -36,7 +44,8 @@ export function Recorder() {
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missingModel, setMissingModel] = useState<ModelStatus | null>(null);
-  const [last, setLast] = useState<RecordingFinished | null>(null);
+  const [open, setOpen] = useState<OpenMeeting | null>(null);
+  const [finished, setFinished] = useState<Meeting | null>(null);
 
   useEffect(() => {
     if (phase !== "recording" && phase !== "stopping") return;
@@ -55,15 +64,18 @@ export function Recorder() {
     setWarning(null);
     setLevels(SILENT);
     setLines([]);
-    setLast(null);
+    setFinished(null);
+    setOpen(null);
     setPhase("starting");
+    const title = defaultTitle(new Date());
     try {
-      const started = await startRecording();
+      const started = await startRecording(title);
       const notes = [
         started.warning && `System audio is off: ${started.warning}. Recording your microphone only.`,
         started.micWarning && `Echo cancellation is off (${started.micWarning}). Use headphones, or the call may also appear under "You".`,
       ].filter(Boolean);
       setWarning(notes.length ? notes.join(" ") : null);
+      setOpen({ id: started.id, title, notesJson: "" });
       setPhase("recording");
     } catch (e) {
       const message = String(e);
@@ -84,27 +96,26 @@ export function Recorder() {
   const stop = async () => {
     setPhase("stopping");
     try {
-      const finished = await stopRecording();
-      setLast(finished);
-      setLines(finished.transcript);
+      const meeting = await stopRecording();
+      setFinished(meeting);
+      setLines(meeting.transcript);
     } catch (e) {
       setError(String(e));
     }
     setPhase("idle");
   };
 
-  if (phase === "idle" || phase === "starting") {
+  if (!open) {
     return (
       <section className="recorder-idle">
         {missingModel ? (
           <ModelDownload model={missingModel} onDone={() => setMissingModel(null)} />
         ) : (
           <div className="empty">
-            <h1>{last ? "Meeting saved" : "No meetings yet"}</h1>
+            <h1>No meetings yet</h1>
             <p>
-              {last
-                ? `${formatDuration(last.durationSecs)} recorded${last.systemPath ? " (you and the call)" : " (microphone only)"}, ${last.transcript.length} transcript ${last.transcript.length === 1 ? "line" : "lines"}.`
-                : "Parley records your mic and the call audio on this Mac and writes a live transcript, without sending audio anywhere."}
+              Parley records your mic and the call audio on this Mac, writes a live transcript, and keeps your notes next to it, all
+              encrypted on this Mac.
             </p>
             <button className="primary" onClick={start} disabled={phase === "starting"}>
               {phase === "starting" ? "Starting…" : "Start recording"}
@@ -112,34 +123,56 @@ export function Recorder() {
             {error && <p className="error" role="alert">{error}</p>}
           </div>
         )}
-        {last && <Transcript lines={lines} />}
       </section>
     );
   }
 
+  const recording = phase === "recording" || phase === "stopping";
   return (
-    <section className="recorder">
+    <section className="meeting">
       <div className="rec-bar">
-        <div className="rec-header">
-          <span className="rec-dot" aria-hidden />
-          <span className="rec-time">{formatDuration(levels.seconds)}</span>
-        </div>
-        <div className="rec-meters">
-          <Meter label="You" db={levels.micDbfs} />
-          <Meter label="Others on the call" db={levels.systemDbfs} />
-        </div>
-        <button className="primary" onClick={stop} disabled={phase === "stopping"}>
-          {phase === "stopping" ? "Finishing transcript…" : "Stop"}
-        </button>
+        {recording ? (
+          <>
+            <div className="rec-header">
+              <span className="rec-dot" aria-hidden />
+              <span className="rec-time">{formatDuration(levels.seconds)}</span>
+            </div>
+            <div className="rec-meters">
+              <Meter label="You" db={levels.micDbfs} />
+              <Meter label="Others on the call" db={levels.systemDbfs} />
+            </div>
+            <button className="primary" onClick={stop} disabled={phase === "stopping"}>
+              {phase === "stopping" ? "Finishing transcript…" : "Stop"}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="rec-summary">
+              {finished
+                ? `Saved. ${formatDuration(finished.durationSecs ?? 0)} recorded, ${finished.transcript.length} transcript ${finished.transcript.length === 1 ? "line" : "lines"}.`
+                : "Recording stopped."}
+            </p>
+            <button className="primary" onClick={start}>
+              New recording
+            </button>
+          </>
+        )}
       </div>
-      {warning && <p className="warning" role="status">{warning}</p>}
-      {(levels.micEnded || levels.systemEnded) && (
+      {warning && recording && <p className="warning" role="status">{warning}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+      {(levels.micEnded || levels.systemEnded) && recording && (
         <p className="error" role="alert">
           {levels.systemEnded ? "Call audio" : "Your microphone"} stopped recording unexpectedly. The rest of the meeting is still being
           captured where possible.
         </p>
       )}
-      <Transcript lines={lines} live />
+      <div className="meeting-body">
+        <NotesEditor key={open.id} meetingId={open.id} initialTitle={open.title} initialJson={open.notesJson} />
+        <aside className="meeting-transcript" aria-label="Transcript">
+          <h2>Transcript</h2>
+          <Transcript lines={lines} live={recording} />
+        </aside>
+      </div>
     </section>
   );
 }

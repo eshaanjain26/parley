@@ -30,6 +30,8 @@ ureq = "3.4.2"
 sha2 = "0.10"
 tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 security-framework = "3"
+rusqlite = { version = "0.40.2", features = ["bundled-sqlcipher"] }
+getrandom = "0.4.3"
 
 [dev-dependencies]
 tempfile = "3"
