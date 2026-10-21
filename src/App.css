@@ -176,3 +176,5 @@ button:not(.primary) { font: inherit; border: 1px solid var(--border); backgroun
 .template-list li span { flex: 1; }
 .template-list button { padding: 4px 10px; font-size: 13px; }
 .template-editor textarea { font: inherit; font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; resize: vertical; }
+.notes-tabs button, .enhance-controls button { white-space: nowrap; }
+.enhance-controls select { max-width: 180px; }
