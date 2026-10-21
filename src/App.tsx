@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 import { Recorder } from "./Recorder";
+import { ModelStatus, formatBytes, listModels } from "./lib/transcript";
 import {
   AppInfo,
   LLM_PROVIDERS,
@@ -46,6 +47,11 @@ function App() {
 function SettingsView() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [status, setStatus] = useState<string>("");
+  const [models, setModels] = useState<ModelStatus[]>([]);
+
+  useEffect(() => {
+    listModels().then(setModels).catch(() => setModels([]));
+  }, []);
 
   useEffect(() => {
     getSettings()
@@ -80,8 +86,14 @@ function SettingsView() {
         </select>
       </label>
       <label>
-        Whisper model
-        <input value={settings.whisperModel} onChange={(e) => set("whisperModel", e.target.value)} />
+        On-device model
+        <select value={settings.whisperModel} onChange={(e) => set("whisperModel", e.target.value)}>
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}, {formatBytes(m.sizeBytes)}{m.installed ? " (downloaded)" : ""}
+            </option>
+          ))}
+        </select>
       </label>
       <h2>AI notes</h2>
       <label>

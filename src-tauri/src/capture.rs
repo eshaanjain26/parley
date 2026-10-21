@@ -34,11 +34,13 @@ impl TrackStats {
     }
 }
 
-/// Resamples incoming chunks to 16 kHz and appends them to a 16-bit mono WAV.
+/// Resamples incoming chunks to 16 kHz and appends them to a 16-bit mono WAV. With a tap,
+/// the same 16 kHz samples are also forwarded (to a transcriber).
 pub struct TrackWriter {
     resampler: Resampler,
     wav: hound::WavWriter<std::io::BufWriter<std::fs::File>>,
     stats: Arc<TrackStats>,
+    tap: Option<Sender<Vec<f32>>>,
 }
 
 impl TrackWriter {
@@ -53,7 +55,22 @@ impl TrackWriter {
             resampler: Resampler::new(source_rate, TARGET_RATE),
             wav: hound::WavWriter::create(path, spec)?,
             stats,
+            tap: None,
         })
+    }
+
+    pub fn with_tap(mut self, tap: Option<Sender<Vec<f32>>>) -> Self {
+        self.tap = tap;
+        self
+    }
+
+    fn forward(&mut self, samples: Vec<f32>) {
+        // A transcriber that stopped (error, or none configured) must not stop the recording.
+        if let Some(tap) = &self.tap
+            && tap.send(samples).is_err()
+        {
+            self.tap = None;
+        }
     }
 
     pub fn push(&mut self, chunk: &[f32]) -> hound::Result<()> {
@@ -68,6 +85,7 @@ impl TrackWriter {
         self.stats
             .samples
             .fetch_add(out.len() as u64, Ordering::Relaxed);
+        self.forward(out);
         Ok(())
     }
 
@@ -78,6 +96,7 @@ impl TrackWriter {
             self.wav.write_sample(0i16)?;
         }
         self.stats.samples.fetch_add(samples, Ordering::Relaxed);
+        self.forward(vec![0.0; samples as usize]);
         Ok(())
     }
 
@@ -93,9 +112,11 @@ fn spawn_writer(
     stats: Arc<TrackStats>,
     lead_in_samples: u64,
     rx: Receiver<Vec<f32>>,
+    tap: Option<Sender<Vec<f32>>>,
 ) -> Result<JoinHandle<Result<(), String>>, String> {
-    let mut writer =
-        TrackWriter::create(&path, source_rate, stats).map_err(|e| format!("{path:?}: {e}"))?;
+    let mut writer = TrackWriter::create(&path, source_rate, stats)
+        .map_err(|e| format!("{path:?}: {e}"))?
+        .with_tap(tap);
     writer
         .pad_silence(lead_in_samples)
         .map_err(|e| e.to_string())?;
@@ -114,7 +135,11 @@ struct MicSource {
     writer: JoinHandle<Result<(), String>>,
 }
 
-fn start_mic(path: PathBuf, stats: Arc<TrackStats>) -> Result<MicSource, String> {
+fn start_mic(
+    path: PathBuf,
+    stats: Arc<TrackStats>,
+    tap: Option<Sender<Vec<f32>>>,
+) -> Result<MicSource, String> {
     let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, String>>();
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
     let (data_tx, data_rx) = mpsc::channel::<Vec<f32>>();
@@ -140,7 +165,7 @@ fn start_mic(path: PathBuf, stats: Arc<TrackStats>) -> Result<MicSource, String>
         .map_err(|_| {
             "microphone did not start (check System Settings > Privacy > Microphone)".to_string()
         })??;
-    let writer = spawn_writer(path, rate, stats, 0, data_rx)?;
+    let writer = spawn_writer(path, rate, stats, 0, data_rx, tap)?;
     Ok(MicSource {
         stop: stop_tx,
         thread,
@@ -218,6 +243,7 @@ fn start_system(
     path: PathBuf,
     stats: Arc<TrackStats>,
     align_to: &TrackStats,
+    tap: Option<Sender<Vec<f32>>>,
 ) -> Result<SystemSource, String> {
     let mut child = Command::new(sidecar)
         .stdin(Stdio::piped())
@@ -273,7 +299,7 @@ fn start_system(
         }
     });
     let lead_in = align_to.samples.load(Ordering::Relaxed);
-    let writer = spawn_writer(path, rate, stats, lead_in, data_rx)?;
+    let writer = spawn_writer(path, rate, stats, lead_in, data_rx, tap)?;
     Ok(SystemSource {
         child,
         stdin,
@@ -300,16 +326,23 @@ pub struct Finished {
 impl Recording {
     /// Starts both tracks. A system-audio failure (old macOS, permission denied) degrades
     /// to mic-only with a warning; a mic failure aborts.
-    pub fn start(dir: PathBuf, sidecar: &Path) -> Result<Self, String> {
+    /// The taps receive each track's 16 kHz audio, for live transcription.
+    pub fn start(
+        dir: PathBuf,
+        sidecar: &Path,
+        mic_tap: Option<Sender<Vec<f32>>>,
+        system_tap: Option<Sender<Vec<f32>>>,
+    ) -> Result<Self, String> {
         std::fs::create_dir_all(&dir).map_err(|e| format!("{dir:?}: {e}"))?;
         let mic_stats = Arc::new(TrackStats::default());
         let system_stats = Arc::new(TrackStats::default());
-        let mic = start_mic(dir.join("mic.wav"), mic_stats.clone())?;
+        let mic = start_mic(dir.join("mic.wav"), mic_stats.clone(), mic_tap)?;
         let (system, system_warning) = match start_system(
             sidecar,
             dir.join("system.wav"),
             system_stats.clone(),
             &mic_stats,
+            system_tap,
         ) {
             Ok(s) => (Some(s), None),
             Err(e) => (None, Some(e)),
@@ -419,6 +452,36 @@ mod tests {
         assert!(samples[..8_000].iter().all(|s| *s == 0));
         assert!(samples[8_000..].iter().all(|s| *s > 16_000));
         assert!((stats.seconds() - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn tap_receives_lead_in_silence_then_resampled_audio() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let stats = Arc::new(TrackStats::default());
+        let mut w = TrackWriter::create(&dir.path().join("t.wav"), 48_000, stats)
+            .unwrap()
+            .with_tap(Some(tx));
+        w.pad_silence(160).unwrap();
+        w.push(&vec![0.25; 4_800]).unwrap();
+        drop(w);
+        let chunks: Vec<Vec<f32>> = rx.iter().collect();
+        assert_eq!(chunks[0], vec![0.0; 160]);
+        let audio: usize = chunks[1..].iter().map(Vec::len).sum();
+        assert!((audio as i64 - 1_600).abs() <= 2, "{audio}");
+    }
+
+    #[test]
+    fn a_closed_tap_does_not_break_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, rx) = mpsc::channel();
+        drop(rx);
+        let mut w = TrackWriter::create(&dir.path().join("t.wav"), 16_000, Arc::default())
+            .unwrap()
+            .with_tap(Some(tx));
+        w.push(&[0.1; 320]).unwrap();
+        w.push(&[0.1; 320]).unwrap();
+        w.finish().unwrap();
     }
 
     #[test]

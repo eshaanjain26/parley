@@ -48,5 +48,20 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+      - name: Cache whisper test model
+        uses: actions/cache@v4
+        with:
+          path: ~/parley-test-models
+          key: whisper-ggml-tiny.en-921e4cf8
+
+      - name: Whisper fixture test
+        working-directory: src-tauri
+        run: |
+          mkdir -p ~/parley-test-models
+          M=~/parley-test-models/ggml-tiny.en.bin
+          [ -f "$M" ] || curl -sSfL -o "$M" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin
+          echo "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f  $M" | shasum -a 256 -c
+          PARLEY_TEST_MODEL="$M" cargo test -- --ignored
+
       - name: Bundle app (unsigned)
         run: npx tauri build --bundles app
