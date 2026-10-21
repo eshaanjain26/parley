@@ -135,3 +135,14 @@ Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integ
 - Live check (signed build): list loads after unlock; "priya" finds the two meetings with highlighted snippets; detail view and narrow layout; Save dialog opens with the title as file name (cancelled, Documents is iCloud-synced); PDF preview shows title, date, notes, enhanced notes and transcript with no app UI; Ask over a local fake Ollama streamed an answer citing the two budget meetings, and the captured prompt held numbered meeting blocks with local dates and matching transcript lines; recording, stop, and two-step delete removed the meeting and its folder.
 - Not checked live: a real LLM answer for Ask (no local model or key); a completed Markdown file save through the dialog.
 - Keychain note: with the self-signed dev identity the Keychain still asks once per rebuild; mic and system-audio permission persist.
+
+### M6 detection, menu bar, hotkey, onboarding (2026-10-21)
+
+- Meeting detection: `parley-micwatch` (Swift sidecar) prints the bundle IDs of processes with live mic input once a second from the Core Audio process list; it never opens an input stream. `detect::Detector` reports a meeting app (Zoom, Teams, Slack, FaceTime, Webex, Discord, WhatsApp, major browsers) after 3 s of mic use, once per session, and stays quiet while Parley records. A detection shows a notification and an in-app banner with Start recording. Settings > "Notify me when a meeting starts".
+- Menu bar: template tray icon with Start/Stop recording, Show Parley and Quit; title reads "REC" while recording. Closing the window hides it, and the Dock icon reopens it.
+- Global hotkey ⌥⇧⌘R toggles recording from any app; Settings can turn it off (registered or unregistered live). Tray, hotkey and banner all emit one `toggle-recording` event the recorder handles.
+- Onboarding on first launch: Welcome, Transcription (model download), AI notes (provider choice), Shortcuts (hotkey and detection toggle). Skippable; finishing saves `onboarded`.
+- Tests: 91 Rust (detector settle, once-per-session, re-arm, suppression, line parsing, settings defaults) + 27 Vitest.
+- Live check (signed build): with `onboarded` reset, the first launch opened onboarding at the Welcome step; it was finished in the app and `onboarded: true` persisted. A recording then started outside the window (menu bar or hotkey), with the "Recording now" row, header and live transcript. `parley-micwatch` run against the live session listed `com.eshaanjain.parley` and `com.apple.CoreSpeech`, which are not meeting apps, so no notification fired, as intended; it exited on stdin EOF.
+- Not checked live: the REC title and menu items (full-screen capture was not available), a real meeting app holding the mic producing the notification and banner, and the Settings hotkey toggle. Detection logic is covered by unit tests.
+- Keychain: relaunching the same signed build asked again once; choose Always Allow.
