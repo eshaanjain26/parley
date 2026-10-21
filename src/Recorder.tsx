@@ -22,9 +22,9 @@ import {
   onTranscriptError,
   onTranscriptLine,
 } from "./lib/transcript";
-import { KEY_MISSING } from "./lib/settings";
+import { missingKeyMessage } from "./lib/settings";
 import { Meeting, defaultTitle } from "./lib/meetings";
-import { NotesEditor } from "./NotesEditor";
+import { MeetingNotes } from "./MeetingNotes";
 
 type Phase = "idle" | "starting" | "recording" | "stopping";
 
@@ -79,9 +79,9 @@ export function Recorder() {
       setPhase("recording");
     } catch (e) {
       const message = String(e);
-      if (message.startsWith(KEY_MISSING)) {
-        const provider = message.slice(KEY_MISSING.length) === "deepgram" ? "Deepgram" : "AssemblyAI";
-        setError(`Add your ${provider} API key in Settings, or switch transcription to "On this Mac".`);
+      const keyMessage = missingKeyMessage(message);
+      if (keyMessage) {
+        setError(`${keyMessage} Or switch transcription to "On this Mac".`);
       } else if (message.startsWith(MODEL_MISSING)) {
         const id = message.slice(MODEL_MISSING.length);
         const model = (await listModels()).find((m) => m.id === id) ?? null;
@@ -167,7 +167,15 @@ export function Recorder() {
         </p>
       )}
       <div className="meeting-body">
-        <NotesEditor key={open.id} meetingId={open.id} initialTitle={open.title} initialJson={open.notesJson} />
+        <MeetingNotes
+          key={open.id}
+          meetingId={open.id}
+          title={open.title}
+          notesJson={open.notesJson}
+          enhancedMd={finished?.enhancedMd ?? ""}
+          enhancedTemplateId={finished?.enhancedTemplateId ?? ""}
+          canEnhance={!recording && finished !== null}
+        />
         <aside className="meeting-transcript" aria-label="Transcript">
           <h2>Transcript</h2>
           <Transcript lines={lines} live={recording} />

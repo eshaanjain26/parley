@@ -152,3 +152,27 @@ button:not(.primary) { font: inherit; border: 1px solid var(--border); backgroun
 .panel label.check { flex-direction: row; align-items: flex-start; gap: 10px; color: var(--text); font-size: 14px; }
 .panel label.check input { margin-top: 3px; }
 .panel label.check .hint { display: block; }
+
+.view { height: 100%; }
+.view[hidden], .notes-pane[hidden] { display: none; }
+.meeting-notes { display: flex; flex-direction: column; min-height: 0; }
+.notes-tabs { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.notes-tabs > button[role="tab"] { border: 0; background: transparent; padding: 6px 12px; border-radius: 7px; color: var(--muted); }
+.notes-tabs > button[role="tab"].active { background: var(--surface); color: var(--text); font-weight: 600; }
+.notes-tabs > button[role="tab"]:disabled { opacity: .4; cursor: default; }
+.enhance-controls { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.enhance-controls select { padding: 6px 8px; }
+.notes-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.enhanced { flex: 1; overflow-y: auto; padding-bottom: 40px; }
+.enhanced-body { line-height: 1.6; }
+.enhanced-body h2 { font-size: 16px; margin: 20px 0 6px; }
+.enhanced-body h2:first-child { margin-top: 0; }
+.enhanced-body ul { padding-left: 22px; margin: 4px 0; }
+.enhanced-body li { margin: 2px 0; }
+
+.templates { margin-top: 32px; border-top: 1px solid var(--border); padding-top: 8px; }
+.template-list { list-style: none; padding: 0; margin: 0 0 12px; }
+.template-list li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.template-list li span { flex: 1; }
+.template-list button { padding: 4px 10px; font-size: 13px; }
+.template-editor textarea { font: inherit; font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; resize: vertical; }
