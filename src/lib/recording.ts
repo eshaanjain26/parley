@@ -22,6 +22,8 @@ export interface AudioLevels {
   micDbfs: number;
   systemDbfs: number;
   seconds: number;
+  micEnded: boolean;
+  systemEnded: boolean;
 }
 
 export const startRecording = () => invoke<RecordingStarted>("start_recording");

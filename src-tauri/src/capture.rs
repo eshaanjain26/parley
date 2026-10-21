@@ -3,11 +3,11 @@
 
 use crate::dsp::{self, Resampler, TARGET_RATE};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -17,6 +17,8 @@ use std::time::Duration;
 pub struct TrackStats {
     level_bits: AtomicU32,
     samples: AtomicU64,
+    /// Set when a sidecar's audio stream closed while the recording was still running.
+    ended: AtomicBool,
 }
 
 impl TrackStats {
@@ -27,6 +29,10 @@ impl TrackStats {
         } else {
             f32::from_bits(bits)
         }
+    }
+
+    pub fn ended_early(&self) -> bool {
+        self.ended.load(Ordering::Relaxed)
     }
 
     pub fn seconds(&self) -> f64 {
@@ -256,15 +262,33 @@ struct SidecarSource {
     stdin: Option<ChildStdin>,
     reader: JoinHandle<()>,
     writer: JoinHandle<Result<(), String>>,
+    stopping: Arc<AtomicBool>,
+    log_path: PathBuf,
 }
 
 impl SidecarSource {
     fn stop(mut self) -> Result<(), String> {
+        self.stopping.store(true, Ordering::Relaxed);
+        let exited_early = self.child.try_wait().ok().flatten();
         // Closing stdin asks the sidecar to tear down its audio objects and exit.
         drop(self.stdin.take());
-        if !wait_with_timeout(&mut self.child, Duration::from_secs(3)) {
-            let _ = self.child.kill();
-            let _ = self.child.wait();
+        let status = match exited_early {
+            Some(status) => format!("exited before stop: {status}"),
+            None if wait_with_timeout(&mut self.child, Duration::from_secs(3)) => {
+                "stopped cleanly".to_string()
+            }
+            None => {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                "killed after not exiting within 3 s".to_string()
+            }
+        };
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log_path)
+        {
+            let _ = writeln!(f, "{status}");
         }
         let _ = self.reader.join();
         self.writer.join().map_err(|_| "sidecar writer panicked")?
@@ -297,12 +321,23 @@ fn start_sidecar(
     let mut stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
 
+    // Every stderr line also goes to <track>.log next to the WAV: a packaged app's stderr is
+    // discarded, and this is the only record of why a sidecar failed mid-meeting.
+    let log_path = path.with_extension("log");
+    let sidecar_log = log_path.clone();
+    let started = std::time::Instant::now();
     let (line_tx, line_rx) = mpsc::channel();
     std::thread::spawn(move || {
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&sidecar_log)
+            .ok();
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            if line_tx.send(line.clone()).is_err() {
-                eprintln!("{label}: {line}");
+            if let Some(f) = log.as_mut() {
+                let _ = writeln!(f, "[{label} +{}ms] {line}", started.elapsed().as_millis());
             }
+            let _ = line_tx.send(line);
         }
     });
     let rate = match line_rx.recv_timeout(ready_timeout) {
@@ -319,6 +354,9 @@ fn start_sidecar(
     };
 
     let (data_tx, data_rx) = mpsc::channel::<Vec<f32>>();
+    let reader_stats = stats.clone();
+    let stopping = Arc::new(AtomicBool::new(false));
+    let reader_stopping = stopping.clone();
     let reader = std::thread::spawn(move || {
         let mut buf = vec![0u8; 16 * 1024];
         let mut carry: Vec<u8> = Vec::new();
@@ -339,6 +377,9 @@ fn start_sidecar(
                 break;
             }
         }
+        if !reader_stopping.load(Ordering::Relaxed) {
+            reader_stats.ended.store(true, Ordering::Relaxed);
+        }
     });
     let lead_in = align_to.map_or(0, |t| t.samples.load(Ordering::Relaxed));
     let writer = spawn_writer(path, rate, stats, lead_in, data_rx, tap.take())?;
@@ -347,6 +388,8 @@ fn start_sidecar(
         stdin,
         reader,
         writer,
+        stopping,
+        log_path,
     })
 }
 

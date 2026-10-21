@@ -197,6 +197,9 @@ struct AudioLevels {
     mic_dbfs: f32,
     system_dbfs: f32,
     seconds: f64,
+    /// A capture stream stopped by itself mid-recording (see <track>.log in the recording).
+    mic_ended: bool,
+    system_ended: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -282,6 +285,8 @@ async fn start_recording(
                     mic_dbfs: mic.level_dbfs(),
                     system_dbfs: system.level_dbfs(),
                     seconds: mic.seconds().max(system.seconds()),
+                    mic_ended: mic.ended_early(),
+                    system_ended: system.ended_early(),
                 },
             );
             std::thread::sleep(Duration::from_millis(100));
