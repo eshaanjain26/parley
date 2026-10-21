@@ -45,7 +45,8 @@
       "entitlements": "Entitlements.plist"
     },
     "externalBin": [
-      "binaries/parley-audiotap"
+      "binaries/parley-audiotap",
+      "binaries/parley-mic"
     ]
   }
 }

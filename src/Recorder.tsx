@@ -26,7 +26,7 @@ import {
 
 type Phase = "idle" | "starting" | "recording" | "stopping";
 
-const SILENT: AudioLevels = { micDbfs: -100, systemDbfs: -100, seconds: 0 };
+const SILENT: AudioLevels = { micDbfs: -100, systemDbfs: -100, seconds: 0, micEnded: false, systemEnded: false };
 
 export function Recorder() {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -58,7 +58,11 @@ export function Recorder() {
     setPhase("starting");
     try {
       const started = await startRecording();
-      setWarning(started.warning ? `System audio is off: ${started.warning}. Recording your microphone only.` : null);
+      const notes = [
+        started.warning && `System audio is off: ${started.warning}. Recording your microphone only.`,
+        started.micWarning && `Echo cancellation is off (${started.micWarning}). Use headphones, or the call may also appear under "You".`,
+      ].filter(Boolean);
+      setWarning(notes.length ? notes.join(" ") : null);
       setPhase("recording");
     } catch (e) {
       const message = String(e);
@@ -125,6 +129,12 @@ export function Recorder() {
         </button>
       </div>
       {warning && <p className="warning" role="status">{warning}</p>}
+      {(levels.micEnded || levels.systemEnded) && (
+        <p className="error" role="alert">
+          {levels.systemEnded ? "Call audio" : "Your microphone"} stopped recording unexpectedly. The rest of the meeting is still being
+          captured where possible.
+        </p>
+      )}
       <Transcript lines={lines} live />
     </section>
   );

@@ -104,7 +104,11 @@ var framesWritten = 0  // only touched on writeQueue
 let gapToleranceFrames = Int(sampleRate * 0.05)
 
 func writeSilence(upTo hostTime: UInt64) {
-    let expected = Int(Double(hostTime &- startHostTime) * secondsPerHostTick * sampleRate)
+    // Buffer timestamps mark when audio was captured, so with input latency (voice processing
+    // adds plenty) the first ones can predate startHostTime. Compare signed; an unsigned
+    // subtraction would wrap to ~2^64 and "fill" an impossible gap.
+    guard hostTime > startHostTime else { return }
+    let expected = Int(Double(hostTime - startHostTime) * secondsPerHostTick * sampleRate)
     let missing = expected - framesWritten
     guard missing > gapToleranceFrames else { return }
     let zeros = [Float](repeating: 0, count: missing)

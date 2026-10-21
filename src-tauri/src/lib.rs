@@ -4,7 +4,7 @@ mod settings;
 mod stt;
 mod transcribe;
 
-use capture::Recording;
+use capture::{Recording, Sidecars};
 use settings::{Settings, SpeechProvider};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -187,6 +187,8 @@ struct RecordingStarted {
     id: String,
     system_audio: bool,
     warning: Option<String>,
+    /// Set when echo cancellation couldn't start and the mic fell back to plain capture.
+    mic_warning: Option<String>,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -195,6 +197,9 @@ struct AudioLevels {
     mic_dbfs: f32,
     system_dbfs: f32,
     seconds: f64,
+    /// A capture stream stopped by itself mid-recording (see <track>.log in the recording).
+    mic_ended: bool,
+    system_ended: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -207,10 +212,13 @@ struct RecordingFinished {
     transcript: Vec<TranscriptLine>,
 }
 
-/// The Swift sidecar is bundled next to the main executable (Contents/MacOS in the .app).
-fn sidecar_path() -> Result<PathBuf, String> {
+/// The Swift sidecars are bundled next to the main executable (Contents/MacOS in the .app).
+fn sidecars() -> Result<Sidecars, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(exe.with_file_name("parley-audiotap"))
+    Ok(Sidecars {
+        system_audio: exe.with_file_name("parley-audiotap"),
+        mic: exe.with_file_name("parley-mic"),
+    })
 }
 
 // Async so Tauri runs it off the main thread: starting can wait on permission prompts.
@@ -241,7 +249,7 @@ async fn start_recording(
 
     let (mic_tx, mic_rx) = mpsc::channel();
     let (system_tx, system_rx) = mpsc::channel();
-    let recording = Recording::start(dir, &sidecar_path()?, Some(mic_tx), Some(system_tx))?;
+    let recording = Recording::start(dir, &sidecars()?, Some(mic_tx), Some(system_tx))?;
 
     let line_emitter = app.clone();
     let on_line: transcribe::OnLine = Arc::new(move |line| {
@@ -277,6 +285,8 @@ async fn start_recording(
                     mic_dbfs: mic.level_dbfs(),
                     system_dbfs: system.level_dbfs(),
                     seconds: mic.seconds().max(system.seconds()),
+                    mic_ended: mic.ended_early(),
+                    system_ended: system.ended_early(),
                 },
             );
             std::thread::sleep(Duration::from_millis(100));
@@ -287,6 +297,7 @@ async fn start_recording(
         id: id.clone(),
         system_audio: recording.system_warning.is_none(),
         warning: recording.system_warning.clone(),
+        mic_warning: recording.mic_warning.clone(),
     };
     *active = Some(ActiveRecording {
         id,

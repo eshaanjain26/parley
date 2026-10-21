@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -17,6 +17,8 @@ use std::time::Duration;
 pub struct TrackStats {
     level_bits: AtomicU32,
     samples: AtomicU64,
+    /// Set when a sidecar's audio stream closed while the recording was still running.
+    ended: AtomicBool,
 }
 
 impl TrackStats {
@@ -27,6 +29,10 @@ impl TrackStats {
         } else {
             f32::from_bits(bits)
         }
+    }
+
+    pub fn ended_early(&self) -> bool {
+        self.ended.load(Ordering::Relaxed)
     }
 
     pub fn seconds(&self) -> f64 {
@@ -128,18 +134,19 @@ fn spawn_writer(
     }))
 }
 
-/// The microphone stream lives on its own thread because cpal streams aren't `Send`.
-struct MicSource {
+/// Plain microphone capture (no echo cancellation). The cpal stream lives on its own thread
+/// because cpal streams aren't `Send`.
+struct CpalMic {
     stop: Sender<()>,
     thread: JoinHandle<()>,
     writer: JoinHandle<Result<(), String>>,
 }
 
-fn start_mic(
+fn start_cpal_mic(
     path: PathBuf,
     stats: Arc<TrackStats>,
-    tap: Option<Sender<Vec<f32>>>,
-) -> Result<MicSource, String> {
+    tap: &mut Option<Sender<Vec<f32>>>,
+) -> Result<CpalMic, String> {
     let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, String>>();
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
     let (data_tx, data_rx) = mpsc::channel::<Vec<f32>>();
@@ -165,12 +172,32 @@ fn start_mic(
         .map_err(|_| {
             "microphone did not start (check System Settings > Privacy > Microphone)".to_string()
         })??;
-    let writer = spawn_writer(path, rate, stats, 0, data_rx, tap)?;
-    Ok(MicSource {
+    let writer = spawn_writer(path, rate, stats, 0, data_rx, tap.take())?;
+    Ok(CpalMic {
         stop: stop_tx,
         thread,
         writer,
     })
+}
+
+enum MicSource {
+    /// Voice-processing I/O via the parley-mic sidecar: the Mac's own speaker output is
+    /// cancelled out of the mic signal.
+    EchoCancelled(SidecarSource),
+    Plain(CpalMic),
+}
+
+impl MicSource {
+    fn stop(self) -> Result<(), String> {
+        match self {
+            MicSource::EchoCancelled(s) => s.stop(),
+            MicSource::Plain(m) => {
+                let _ = m.stop.send(());
+                let _ = m.thread.join();
+                m.writer.join().map_err(|_| "mic writer panicked")?
+            }
+        }
+    }
 }
 
 fn open_mic_stream(tx: Sender<Vec<f32>>) -> Result<(cpal::Stream, u32), String> {
@@ -229,43 +256,93 @@ pub fn parse_ready_line(line: &str) -> Result<u32, String> {
     }
 }
 
-struct SystemSource {
+/// A track captured by one of the Swift sidecars (system audio tap or echo-cancelled mic).
+struct SidecarSource {
     child: Child,
     stdin: Option<ChildStdin>,
     reader: JoinHandle<()>,
     writer: JoinHandle<Result<(), String>>,
+    stopping: Arc<AtomicBool>,
+    log_path: PathBuf,
 }
 
-/// `align_to` is the track already running (the mic); the system track is padded with
-/// silence for however long that track recorded before the sidecar became ready.
-fn start_system(
+impl SidecarSource {
+    fn stop(mut self) -> Result<(), String> {
+        self.stopping.store(true, Ordering::Relaxed);
+        let exited_early = self.child.try_wait().ok().flatten();
+        // Closing stdin asks the sidecar to tear down its audio objects and exit.
+        drop(self.stdin.take());
+        let status = match exited_early {
+            Some(status) => format!("exited before stop: {status}"),
+            None if wait_with_timeout(&mut self.child, Duration::from_secs(3)) => {
+                "stopped cleanly".to_string()
+            }
+            None => {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                "killed after not exiting within 3 s".to_string()
+            }
+        };
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log_path)
+        {
+            let _ = writeln!(f, "{status}");
+        }
+        let _ = self.reader.join();
+        self.writer.join().map_err(|_| "sidecar writer panicked")?
+    }
+}
+
+/// Starts `sidecar` and records its PCM stream to `path`. With `align_to`, the track is padded
+/// with silence for however long that already-running track recorded before this one became
+/// ready. The tap is only taken once the sidecar is ready, so a caller can fall back to
+/// another source with it on failure.
+fn start_sidecar(
     sidecar: &Path,
+    ready_timeout: Duration,
     path: PathBuf,
     stats: Arc<TrackStats>,
-    align_to: &TrackStats,
-    tap: Option<Sender<Vec<f32>>>,
-) -> Result<SystemSource, String> {
+    align_to: Option<&TrackStats>,
+    tap: &mut Option<Sender<Vec<f32>>>,
+) -> Result<SidecarSource, String> {
     let mut child = Command::new(sidecar)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("could not start {sidecar:?}: {e}"))?;
+    let label = sidecar
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let stdin = child.stdin.take();
     let mut stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
 
+    // Every stderr line also goes to <track>.log next to the WAV: a packaged app's stderr is
+    // discarded, and this is the only record of why a sidecar failed mid-meeting.
+    let log_path = path.with_extension("log");
+    let sidecar_log = log_path.clone();
+    let started = std::time::Instant::now();
     let (line_tx, line_rx) = mpsc::channel();
     std::thread::spawn(move || {
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&sidecar_log)
+            .ok();
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            if line_tx.send(line.clone()).is_err() {
-                eprintln!("audiotap: {line}");
+            if let Some(f) = log.as_mut() {
+                let _ = writeln!(f, "[{label} +{}ms] {line}", started.elapsed().as_millis());
             }
+            let _ = line_tx.send(line);
         }
     });
-    let rate = match line_rx.recv_timeout(Duration::from_secs(10)) {
+    let rate = match line_rx.recv_timeout(ready_timeout) {
         Ok(line) => parse_ready_line(&line),
-        Err(_) => Err("system audio capture did not start".into()),
+        Err(_) => Err("audio capture did not start".into()),
     };
     let rate = match rate {
         Ok(r) => r,
@@ -277,6 +354,9 @@ fn start_system(
     };
 
     let (data_tx, data_rx) = mpsc::channel::<Vec<f32>>();
+    let reader_stats = stats.clone();
+    let stopping = Arc::new(AtomicBool::new(false));
+    let reader_stopping = stopping.clone();
     let reader = std::thread::spawn(move || {
         let mut buf = vec![0u8; 16 * 1024];
         let mut carry: Vec<u8> = Vec::new();
@@ -297,15 +377,26 @@ fn start_system(
                 break;
             }
         }
+        if !reader_stopping.load(Ordering::Relaxed) {
+            reader_stats.ended.store(true, Ordering::Relaxed);
+        }
     });
-    let lead_in = align_to.samples.load(Ordering::Relaxed);
-    let writer = spawn_writer(path, rate, stats, lead_in, data_rx, tap)?;
-    Ok(SystemSource {
+    let lead_in = align_to.map_or(0, |t| t.samples.load(Ordering::Relaxed));
+    let writer = spawn_writer(path, rate, stats, lead_in, data_rx, tap.take())?;
+    Ok(SidecarSource {
         child,
         stdin,
         reader,
         writer,
+        stopping,
+        log_path,
     })
+}
+
+/// Paths to the bundled capture sidecars.
+pub struct Sidecars {
+    pub system_audio: PathBuf,
+    pub mic: PathBuf,
 }
 
 pub struct Recording {
@@ -313,8 +404,9 @@ pub struct Recording {
     pub mic_stats: Arc<TrackStats>,
     pub system_stats: Arc<TrackStats>,
     pub system_warning: Option<String>,
+    pub mic_warning: Option<String>,
     mic: MicSource,
-    system: Option<SystemSource>,
+    system: Option<SidecarSource>,
 }
 
 pub struct Finished {
@@ -324,25 +416,42 @@ pub struct Finished {
 }
 
 impl Recording {
-    /// Starts both tracks. A system-audio failure (old macOS, permission denied) degrades
-    /// to mic-only with a warning; a mic failure aborts.
-    /// The taps receive each track's 16 kHz audio, for live transcription.
+    /// Starts both tracks; the taps receive each track's 16 kHz audio for live transcription.
+    /// The mic prefers echo cancellation and falls back to plain capture with a warning; a
+    /// system-audio failure degrades to mic-only with a warning; only a mic failure aborts.
     pub fn start(
         dir: PathBuf,
-        sidecar: &Path,
-        mic_tap: Option<Sender<Vec<f32>>>,
-        system_tap: Option<Sender<Vec<f32>>>,
+        sidecars: &Sidecars,
+        mut mic_tap: Option<Sender<Vec<f32>>>,
+        mut system_tap: Option<Sender<Vec<f32>>>,
     ) -> Result<Self, String> {
         std::fs::create_dir_all(&dir).map_err(|e| format!("{dir:?}: {e}"))?;
         let mic_stats = Arc::new(TrackStats::default());
         let system_stats = Arc::new(TrackStats::default());
-        let mic = start_mic(dir.join("mic.wav"), mic_stats.clone(), mic_tap)?;
-        let (system, system_warning) = match start_system(
-            sidecar,
+
+        // The first start can sit behind the macOS microphone permission prompt.
+        let (mic, mic_warning) = match start_sidecar(
+            &sidecars.mic,
+            Duration::from_secs(60),
+            dir.join("mic.wav"),
+            mic_stats.clone(),
+            None,
+            &mut mic_tap,
+        ) {
+            Ok(s) => (MicSource::EchoCancelled(s), None),
+            Err(e) => {
+                let mic = start_cpal_mic(dir.join("mic.wav"), mic_stats.clone(), &mut mic_tap)?;
+                (MicSource::Plain(mic), Some(e))
+            }
+        };
+
+        let (system, system_warning) = match start_sidecar(
+            &sidecars.system_audio,
+            Duration::from_secs(10),
             dir.join("system.wav"),
             system_stats.clone(),
-            &mic_stats,
-            system_tap,
+            Some(&mic_stats),
+            &mut system_tap,
         ) {
             Ok(s) => (Some(s), None),
             Err(e) => (None, Some(e)),
@@ -352,37 +461,21 @@ impl Recording {
             mic_stats,
             system_stats,
             system_warning,
+            mic_warning,
             mic,
             system,
         })
     }
 
     pub fn stop(self) -> Result<Finished, String> {
-        let _ = self.mic.stop.send(());
-        let _ = self.mic.thread.join();
-        self.mic
-            .writer
-            .join()
-            .map_err(|_| "mic writer panicked")??;
-
+        self.mic.stop()?;
         let system_path = match self.system {
-            Some(mut s) => {
-                // Closing stdin asks the sidecar to tear down its tap and exit.
-                if let Some(mut stdin) = s.stdin.take() {
-                    let _ = stdin.flush();
-                }
-                let exited = wait_with_timeout(&mut s.child, Duration::from_secs(3));
-                if !exited {
-                    let _ = s.child.kill();
-                    let _ = s.child.wait();
-                }
-                let _ = s.reader.join();
-                s.writer.join().map_err(|_| "system writer panicked")??;
+            Some(s) => {
+                s.stop()?;
                 Some(self.dir.join("system.wav"))
             }
             None => None,
         };
-
         Ok(Finished {
             mic_path: self.dir.join("mic.wav"),
             system_path,

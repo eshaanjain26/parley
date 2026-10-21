@@ -7,6 +7,7 @@ export interface RecordingStarted {
   id: string;
   systemAudio: boolean;
   warning: string | null;
+  micWarning: string | null;
 }
 
 export interface RecordingFinished {
@@ -21,6 +22,8 @@ export interface AudioLevels {
   micDbfs: number;
   systemDbfs: number;
   seconds: number;
+  micEnded: boolean;
+  systemEnded: boolean;
 }
 
 export const startRecording = () => invoke<RecordingStarted>("start_recording");

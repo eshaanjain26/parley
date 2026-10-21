@@ -81,5 +81,14 @@ Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integ
 - UI: live transcript with partials in italics, in-app model download with progress, model picker in Settings.
 - Tests: 40 Rust + 1 model-backed fixture test (spoken WAV from `say`, run in CI against tiny.en) + 12 Vitest.
 - Live check: spoken sentence played through system audio appeared as a final "Them" line within the 13 s recording, matching the script word for word; `transcript.json` correct.
-- Known issue: on laptop speakers the mic hears the call, so "Them" speech is duplicated as "You". Fix: echo cancellation on the mic (macOS voice-processing I/O) — next.
+- Known issue (fixed in the echo-cancellation PR): on laptop speakers the mic heard the call, so "Them" speech was duplicated as "You".
 - Local machine note: `/Library/Developer/CommandLineTools/usr/include/c++/v1` is a stale 11-file leftover that hides the SDK's libc++ headers, so C++ builds fail without `CXXFLAGS="-isystem $(xcrun --show-sdk-path)/usr/include/c++/v1"`. Removing that folder (sudo) or reinstalling the Command Line Tools fixes it for good.
+
+### Echo cancellation (2026-10-20)
+
+- New `parley-mic` Swift sidecar: AVAudioEngine with voice processing enabled (Apple's echo cancellation), other-audio ducking set to minimum so call audio isn't turned down. Falls back to plain cpal capture with a UI warning.
+- Shared sidecar runner for both capture helpers; the transcriber tap is handed over only once a source is ready, so the fallback keeps it.
+- Each sidecar's stderr and exit status go to `<track>.log` in the recording folder; the UI warns if a track stops mid-recording.
+- Bug found through those logs: `parley-audiotap` crashed when voice processing was on ("failed to allocate 147573952589675104 bytes"). Input latency made buffer timestamps predate the start time and the unsigned subtraction wrapped to ~2^64. Fixed with a signed comparison.
+- Live check: sentence played through laptop speakers is transcribed once, as "Them"; the mic is gated to -51 to -180 dB during playback; tracks 29.40 s vs 29.72 s; both sidecars stopped cleanly.
+- Follow-up: whisper transcribes steady room noise (mic at -30 to -40 dB) into short nonsense lines. Filter on whisper's no-speech probability and tighten the VAD for the mic track.
