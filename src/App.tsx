@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 import { Recorder } from "./Recorder";
+import { ApiKeyStatus, apiKeyStatus, deleteApiKey, hasKeyFor, setApiKey } from "./lib/settings";
 import { ModelStatus, formatBytes, listModels } from "./lib/transcript";
 import {
   AppInfo,
@@ -48,9 +49,13 @@ function SettingsView() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [status, setStatus] = useState<string>("");
   const [models, setModels] = useState<ModelStatus[]>([]);
+  const [keys, setKeys] = useState<ApiKeyStatus | null>(null);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [keyStatus, setKeyStatus] = useState("");
 
   useEffect(() => {
     listModels().then(setModels).catch(() => setModels([]));
+    apiKeyStatus().then(setKeys).catch(() => setKeys(null));
   }, []);
 
   useEffect(() => {
@@ -63,6 +68,30 @@ function SettingsView() {
 
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     setSettings({ ...settings, [key]: value });
+
+  const cloud = settings.speechProvider !== "local-whisper";
+  const providerName = settings.speechProvider === "deepgram" ? "Deepgram" : "AssemblyAI";
+
+  const saveKey = async () => {
+    try {
+      await setApiKey(settings.speechProvider, keyDraft);
+      setKeyDraft("");
+      setKeys(await apiKeyStatus());
+      setKeyStatus("Saved in your Keychain");
+    } catch (e) {
+      setKeyStatus(`Couldn't save the key: ${e}`);
+    }
+  };
+
+  const removeKey = async () => {
+    try {
+      await deleteApiKey(settings.speechProvider);
+      setKeys(await apiKeyStatus());
+      setKeyStatus("Key removed");
+    } catch (e) {
+      setKeyStatus(`Couldn't remove the key: ${e}`);
+    }
+  };
 
   const save = async () => {
     try {
@@ -85,16 +114,38 @@ function SettingsView() {
           ))}
         </select>
       </label>
-      <label>
-        On-device model
-        <select value={settings.whisperModel} onChange={(e) => set("whisperModel", e.target.value)}>
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}, {formatBytes(m.sizeBytes)}{m.installed ? " (downloaded)" : ""}
-            </option>
-          ))}
-        </select>
-      </label>
+      {cloud && (
+        <div className="key-field">
+          <label>
+            {providerName} API key
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder={hasKeyFor(keys, settings.speechProvider) ? "A key is saved. Paste a new one to replace it." : "Paste your key"}
+              value={keyDraft}
+              onChange={(e) => setKeyDraft(e.target.value)}
+            />
+          </label>
+          <div className="actions">
+            <button onClick={saveKey} disabled={!keyDraft.trim()}>Save key</button>
+            {hasKeyFor(keys, settings.speechProvider) && <button onClick={removeKey}>Remove key</button>}
+            <span className="status" role="status">{keyStatus}</span>
+          </div>
+          <p className="hint">Audio is sent to {providerName} while you record. The key is stored in the macOS Keychain.</p>
+        </div>
+      )}
+      {!cloud && (
+        <label>
+          On-device model
+          <select value={settings.whisperModel} onChange={(e) => set("whisperModel", e.target.value)}>
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}, {formatBytes(m.sizeBytes)}{m.installed ? " (downloaded)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <h2>AI notes</h2>
       <label>
         Provider

@@ -120,3 +120,7 @@ button:not(.primary) { font: inherit; border: 1px solid var(--border); backgroun
 .line-me .line-speaker { color: var(--accent); }
 .line-text { line-height: 1.55; }
 .line-partial .line-text { color: var(--muted); font-style: italic; }
+
+.key-field { margin-bottom: 12px; }
+.key-field .actions { margin-top: 0; }
+.hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }

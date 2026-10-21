@@ -23,6 +23,7 @@ import {
   onTranscriptError,
   onTranscriptLine,
 } from "./lib/transcript";
+import { KEY_MISSING } from "./lib/settings";
 
 type Phase = "idle" | "starting" | "recording" | "stopping";
 
@@ -66,7 +67,10 @@ export function Recorder() {
       setPhase("recording");
     } catch (e) {
       const message = String(e);
-      if (message.startsWith(MODEL_MISSING)) {
+      if (message.startsWith(KEY_MISSING)) {
+        const provider = message.slice(KEY_MISSING.length) === "deepgram" ? "Deepgram" : "AssemblyAI";
+        setError(`Add your ${provider} API key in Settings, or switch transcription to "On this Mac".`);
+      } else if (message.startsWith(MODEL_MISSING)) {
         const id = message.slice(MODEL_MISSING.length);
         const model = (await listModels()).find((m) => m.id === id) ?? null;
         setMissingModel(model);

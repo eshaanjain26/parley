@@ -1,8 +1,10 @@
 //! Speech-to-text. Every engine (local whisper.cpp, Deepgram, AssemblyAI) implements
 //! `SpeechToText` over the same 16 kHz mono stream, so the recorder doesn't care which runs.
 
+pub mod cloud;
 pub mod models;
 pub mod segmenter;
+pub mod streaming;
 pub mod whisper;
 
 use serde::Serialize;

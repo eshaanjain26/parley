@@ -30,7 +30,7 @@ Rust core
 
 - [x] **M0 Toolchain + scaffold**: install rustup and cmake, create Tauri 2 app, CI that builds and tests on macOS. Bootstrap repo.
 - [x] **M1 Capture**: Swift tap sidecar, mic capture, mixer, permission prompts (mic + system audio), level meters. Tests on resampler and chunker.
-- [ ] **M2 Live transcript**: whisper.cpp local streaming with partials, then Deepgram and AssemblyAI behind the same trait. Model download manager. Tests with fixture WAVs.
+- [x] **M2 Live transcript**: whisper.cpp local streaming with partials, then Deepgram and AssemblyAI behind the same trait. Model download manager. Tests with fixture WAVs.
 - [ ] **M3 Notes**: TipTap editor beside the live transcript; meeting record saved to encrypted SQLite.
 - [ ] **M4 AI notes**: "Enhance" merges your notes + transcript through a template; streaming output; 4 built-in templates (general, 1:1, sales call, standup) plus custom. Ollama default, BYO cloud keys.
 - [ ] **M5 Library**: meeting list, full-text search, ask-across-meetings chat, Markdown/PDF export, copy to clipboard.
@@ -92,3 +92,12 @@ Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integ
 - Bug found through those logs: `parley-audiotap` crashed when voice processing was on ("failed to allocate 147573952589675104 bytes"). Input latency made buffer timestamps predate the start time and the unsigned subtraction wrapped to ~2^64. Fixed with a signed comparison.
 - Live check: sentence played through laptop speakers is transcribed once, as "Them"; the mic is gated to -51 to -180 dB during playback; tracks 29.40 s vs 29.72 s; both sidecars stopped cleanly.
 - Follow-up: whisper transcribes steady room noise (mic at -30 to -40 dB) into short nonsense lines. Filter on whisper's no-speech probability and tighten the VAD for the mic track.
+
+### M2b cloud transcription (2026-10-21)
+
+- `StreamingEngine`: one I/O thread owns the WebSocket (tungstenite over rustls), sends 100 ms PCM16 chunks, polls replies with a 20 ms read timeout, and on finish sends the provider's close message and drains finals for up to 8 s. Connects during `start_recording`, so a bad key fails up front ("Deepgram rejected the API key (401)").
+- Deepgram (`nova-3`, interim results, smart formatting) and AssemblyAI v3 (`format_turns`, final only once the formatted turn arrives) are each just a URL, an auth header, a close message and a JSON parser behind `StreamParser`.
+- API keys are stored in the macOS Keychain (`security-framework` generic passwords, service `com.eshaanjain.parley`); the UI only sees whether a key exists.
+- Settings: masked key field with save/remove for the selected cloud provider; the on-device model picker hides for cloud engines. Starting without a key explains what to do.
+- Tests: 47 Rust (incl. end-to-end streaming against a local WebSocket server: chunking, auth header, final on finish, provider error, connection refused; parser tests for both providers) + 14 Vitest.
+- Live check: with Deepgram selected and no key, Start shows "Add your Deepgram API key in Settings…"; the Settings key field renders as designed. Not checked: a real Deepgram or AssemblyAI session (needs your API key).
