@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "set-version": "node scripts/version.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

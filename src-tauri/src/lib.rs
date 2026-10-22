@@ -11,6 +11,7 @@ mod shell;
 mod store;
 mod stt;
 mod transcribe;
+mod update;
 
 use capture::{Recording, Sidecars};
 use settings::{LlmProvider, Settings, SpeechProvider};
@@ -56,6 +57,19 @@ fn app_info(app: tauri::AppHandle) -> AppInfo {
         version: pkg.version.to_string(),
         hotkey: shell::HOTKEY_LABEL,
     }
+}
+
+#[tauri::command]
+async fn check_for_update(app: tauri::AppHandle) -> Result<Option<update::UpdateInfo>, String> {
+    update::check_and_download(&app).await
+}
+
+#[tauri::command]
+fn install_update(app: tauri::AppHandle, recorder: State<'_, RecorderState>) -> Result<(), String> {
+    if recorder.0.lock().unwrap().is_some() {
+        return Err("Stop the recording before updating.".into());
+    }
+    update::install_and_restart(&app)
 }
 
 #[tauri::command]
@@ -803,6 +817,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(shell::global_shortcut_plugin())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(StoreState::default())
         .setup(|app| {
             // Reading the database key can wait on a macOS Keychain prompt. Off the main thread,
@@ -829,6 +844,18 @@ pub fn run() {
                 eprintln!("{e}");
             }
             shell::start_meeting_watcher(app.handle().clone());
+            if prefs.auto_update {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    // Give launch (and any Keychain prompt) a moment before touching the network.
+                    std::thread::sleep(Duration::from_secs(20));
+                    let result =
+                        tauri::async_runtime::block_on(update::check_and_download(&handle));
+                    if let Err(e) = result {
+                        eprintln!("update check failed: {e}");
+                    }
+                });
+            }
             Ok(())
         })
         // Closing the window hides it: Parley keeps listening for meetings from the menu bar.
@@ -842,8 +869,11 @@ pub fn run() {
         .manage(ModelCache::default())
         .manage(DownloadState::default())
         .manage(EnhanceState::default())
+        .manage(update::PendingUpdate::default())
         .invoke_handler(tauri::generate_handler![
             app_info,
+            check_for_update,
+            install_update,
             get_settings,
             update_settings,
             list_models,
