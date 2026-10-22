@@ -1,8 +1,9 @@
-import { ArrowUp, BookOpen, MessageCircleQuestion, Square } from "lucide-react";
+import { ArrowUp, BookOpen, Folder as FolderIcon, MessageCircleQuestion, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cancelEnhance, renderMarkdown } from "./lib/enhance";
 import { Source, askMeetings, formatWhen, onAskDelta } from "./lib/library";
 import { missingKeyMessage } from "./lib/settings";
+import { Folder } from "./lib/folders";
 
 const EXAMPLES = [
   "What did we decide about the budget?",
@@ -13,10 +14,13 @@ const EXAMPLES = [
 interface Props {
   /** Asked straight away (from the Ask bar). */
   initialQuestion?: string;
+  /** Answers only from this folder's meetings. */
+  folder?: Folder;
+  onClearFolder: () => void;
   onOpenMeeting: (id: string) => void;
 }
 
-export function AskView({ initialQuestion, onOpenMeeting }: Props) {
+export function AskView({ initialQuestion, folder, onClearFolder, onOpenMeeting }: Props) {
   const [question, setQuestion] = useState(initialQuestion ?? "");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
@@ -35,7 +39,7 @@ export function AskView({ initialQuestion, onOpenMeeting }: Props) {
     setSources([]);
     const unlisten = await onAskDelta((t) => setAnswer((prev) => prev + t));
     try {
-      const result = await askMeetings(q);
+      const result = await askMeetings(q, folder?.id ?? null);
       setAnswer(result.answer);
       setSources(result.sources);
     } catch (e) {
@@ -58,8 +62,15 @@ export function AskView({ initialQuestion, onOpenMeeting }: Props) {
       <div className="page-scroll">
         <section className="ask column">
           <header className="page-header">
-            <p className="eyebrow">Across every meeting on this Mac</p>
-            <h1 className="display">Ask your meetings</h1>
+            <p className="eyebrow">{folder ? "Only meetings in this folder" : "Across every meeting on this Mac"}</p>
+            <h1 className="display">{folder ? `Ask about ${folder.name}` : "Ask your meetings"}</h1>
+            {folder && (
+              <button className="chip scope-chip" onClick={onClearFolder} aria-label={`Ask across all meetings instead of only ${folder.name}`}>
+                <FolderIcon size={14} aria-hidden />
+                {folder.name}
+                <X size={13} aria-hidden />
+              </button>
+            )}
           </header>
           <form
             className="ask-bar inline"

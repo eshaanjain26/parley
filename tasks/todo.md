@@ -230,3 +230,11 @@ Speaker names, on-device diarization, Windows, integrations (Slack, Notion, CRM)
 - Not checked: launching the published build (it would share the dev build's data and Keychain item), and an update from 0.1.0 to a later release (needs 0.1.1).
 - Feed URLs: tauri-action linked the feed to `api.github.com` asset URLs (the release was a draft when it wrote them), which count against GitHub's 60/hour unauthenticated API limit per IP. A `feed` job now rewrites them to `releases/download/<tag>/<asset>` after both builds (`scripts/feed-urls.mjs`, tested). The published v0.1.0 feed was rewritten the same way: only URLs changed (version, notes, date and signatures identical), and both bundles download from github.com and verify against the project key.
 - Follow-up: Developer ID signing and notarization once there's an Apple Developer membership.
+
+### Folders (PR A, 2026-10-22, not yet checked in the app)
+
+- Migration v4: `folders` table and nullable `meetings.folder_id` with `ON DELETE SET NULL`, so deleting a folder unfiles its meetings. Names are trimmed and whitespace-collapsed, 1 to 60 characters, unique ignoring case (checked in the UI and again in the store).
+- Store: list, create, rename, delete, file or unfile a meeting; `list_meetings` and `search` take an optional folder; Ask retrieval (search, then recent-meetings fallback) stays inside the folder.
+- UI: Folders section in the sidebar with counts and inline create; folder page (Home scoped to the folder: start card records into it, search, day groups, Ask bar "Ask about <folder>", rename and delete with confirmation); folder chip on meeting and recording pages to move, create-and-move or remove; folder names on Home rows; Ask shows its folder scope with a chip to widen it.
+- Tests: Rust 97 (5 new: scoping of list, search and counts; name rules; delete keeps meetings; v3 to v4 migration on an existing database; random ids). Vitest 42 (3 new for name checks).
+- Not checked in the app: the disk ran out during the app build (356 MB free).

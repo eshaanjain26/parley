@@ -8,6 +8,7 @@ export interface MeetingSummary {
   startedAtMs: number;
   durationSecs: number | null;
   hasEnhanced: boolean;
+  folderId: string | null;
   /** Search results only: the best passage, with \u0001 / \u0002 around matched words. */
   snippet: string | null;
 }
@@ -28,11 +29,14 @@ export interface Answer {
 /** Minutes east of UTC, the way the backend formats local dates. */
 export const utcOffsetMinutes = (date = new Date()) => -date.getTimezoneOffset();
 
-export const listMeetings = (limit = 200, offset = 0) => invoke<MeetingSummary[]>("list_meetings", { limit, offset });
-export const searchMeetings = (query: string) => invoke<MeetingSummary[]>("search_meetings", { query });
+/** `folderId` limits the list (or search) to one folder. */
+export const listMeetings = (folderId: string | null = null, limit = 200, offset = 0) =>
+  invoke<MeetingSummary[]>("list_meetings", { limit, offset, folderId });
+export const searchMeetings = (query: string, folderId: string | null = null) =>
+  invoke<MeetingSummary[]>("search_meetings", { query, folderId });
 export const deleteMeeting = (id: string) => invoke<void>("delete_meeting", { id });
-export const askMeetings = (question: string) =>
-  invoke<Answer>("ask_meetings", { question, utcOffsetMinutes: utcOffsetMinutes() });
+export const askMeetings = (question: string, folderId: string | null = null) =>
+  invoke<Answer>("ask_meetings", { question, utcOffsetMinutes: utcOffsetMinutes(), folderId });
 export const onAskDelta = (cb: (text: string) => void): Promise<UnlistenFn> =>
   listen<{ text: string }>("ask-delta", (e) => cb(e.payload.text));
 export const exportMarkdown = (id: string) =>

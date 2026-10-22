@@ -1,7 +1,8 @@
-import { House, Lock, MessageCircleQuestion, Settings as SettingsIcon, Square } from "lucide-react";
+import { Folder as FolderIcon, House, Lock, MessageCircleQuestion, Plus, Settings as SettingsIcon, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import { AskView } from "./AskView";
+import { FolderNameForm, FoldersProvider, useFolders } from "./Folders";
 import { Home } from "./Home";
 import { MeetingPage } from "./MeetingPage";
 import { Onboarding } from "./Onboarding";
@@ -17,7 +18,8 @@ type Route =
   | { name: "home" }
   | { name: "meeting"; id: string }
   | { name: "recording" }
-  | { name: "ask"; question?: string; nonce: number }
+  | { name: "folder"; id: string }
+  | { name: "ask"; question?: string; folderId?: string; nonce: number }
   | { name: "settings" };
 
 const NAV = [
@@ -41,18 +43,22 @@ function App() {
   }
 
   return (
-    <RecordingProvider
-      onStarted={() => setRoute({ name: "recording" })}
-      onNeedsAttention={() => setRoute({ name: "recording" })}
-      onFinished={(id) => setRoute({ name: "meeting", id })}
-    >
-      <Shell route={route} setRoute={setRoute} info={info} />
-    </RecordingProvider>
+    <FoldersProvider>
+      <RecordingProvider
+        onStarted={() => setRoute({ name: "recording" })}
+        onNeedsAttention={() => setRoute({ name: "recording" })}
+        onFinished={(id) => setRoute({ name: "meeting", id })}
+      >
+        <Shell route={route} setRoute={setRoute} info={info} />
+      </RecordingProvider>
+    </FoldersProvider>
   );
 }
 
 function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) => void; info: AppInfo | null }) {
   const rec = useRecording();
+  const folders = useFolders();
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const [detected, setDetected] = useState<MeetingDetected | null>(null);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [focusSearch, setFocusSearch] = useState(0);
@@ -69,7 +75,11 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
     if (recording) setDetected(null);
   }, [recording]);
 
-  const ask = (question?: string) => setRoute({ name: "ask", question, nonce: Date.now() });
+  // Folder counts change when a recording starts in a folder or a meeting is saved.
+  const { refresh: refreshFolders } = folders;
+  useEffect(refreshFolders, [rec.phase, route, refreshFolders]);
+
+  const ask = (question?: string, folderId?: string) => setRoute({ name: "ask", question, folderId, nonce: Date.now() });
 
   // App-wide shortcuts. ⌘N mirrors the global ⌥⇧⌘R so it works without the hotkey too.
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -92,6 +102,7 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
   }, []);
 
   const active = route.name === "meeting" || route.name === "recording" ? "home" : route.name;
+  const openFolder = route.name === "folder" ? folders.byId(route.id) : undefined;
 
   return (
     <div className="shell">
@@ -114,6 +125,48 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
             </button>
           ))}
         </nav>
+
+        <section className="folders" aria-labelledby="folders-label">
+          <div className="folders-head">
+            <h2 id="folders-label" className="panel-label">Folders</h2>
+            <button className="icon-button small" aria-label="New folder" onClick={() => setCreatingFolder(true)}>
+              <Plus size={15} aria-hidden />
+            </button>
+          </div>
+          {creatingFolder && (
+            <FolderNameForm
+              submitLabel="Create folder"
+              onCancel={() => setCreatingFolder(false)}
+              onSubmit={async (name) => {
+                const folder = await folders.create(name);
+                setCreatingFolder(false);
+                setRoute({ name: "folder", id: folder.id });
+              }}
+            />
+          )}
+          {folders.folders.length === 0 && !creatingFolder ? (
+            <p className="folders-empty">Group meetings by client, team or project.</p>
+          ) : (
+            <ul>
+              {folders.folders.map((f) => {
+                const current = route.name === "folder" && route.id === f.id;
+                return (
+                  <li key={f.id}>
+                    <button
+                      className={`nav-item folder-item${current ? " active" : ""}`}
+                      aria-current={current ? "page" : undefined}
+                      onClick={() => setRoute({ name: "folder", id: f.id })}
+                    >
+                      <FolderIcon size={16} aria-hidden />
+                      <span>{f.name}</span>
+                      <span className="count" aria-label={`${f.meetingCount} meetings`}>{f.meetingCount}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
 
         {recording && (
           <div className="rec-pill" role="status">
@@ -139,6 +192,20 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
       </aside>
 
       <main className="content">
+        {route.name === "folder" && openFolder && (
+          <Home
+            key={openFolder.id}
+            folder={openFolder}
+            onFolderDeleted={() => setRoute({ name: "home" })}
+            hotkey={info?.hotkey ?? "⌥⇧⌘R"}
+            detected={detected}
+            onDismissDetected={() => setDetected(null)}
+            onOpenMeeting={(id) => setRoute({ name: "meeting", id })}
+            onOpenRecording={() => setRoute({ name: "recording" })}
+            onAsk={(q) => ask(q, openFolder.id)}
+            focusSearch={focusSearch}
+          />
+        )}
         {route.name === "home" && (
           <Home
             hotkey={info?.hotkey ?? "⌥⇧⌘R"}
@@ -166,7 +233,13 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
           </div>
         )}
         {route.name === "ask" && (
-          <AskView key={route.nonce} initialQuestion={route.question} onOpenMeeting={(id) => setRoute({ name: "meeting", id })} />
+          <AskView
+            key={route.nonce}
+            initialQuestion={route.question}
+            folder={folders.byId(route.folderId)}
+            onClearFolder={() => setRoute({ name: "ask", nonce: Date.now() })}
+            onOpenMeeting={(id) => setRoute({ name: "meeting", id })}
+          />
         )}
         {route.name === "settings" && <SettingsView />}
       </main>

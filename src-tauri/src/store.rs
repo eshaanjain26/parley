@@ -29,6 +29,8 @@ pub struct Meeting {
     pub enhanced_md: String,
     pub enhanced_template_id: String,
     pub enhanced_at_ms: Option<i64>,
+    /// The folder the meeting is filed in, if any.
+    pub folder_id: Option<String>,
     pub transcript: Vec<TranscriptLine>,
 }
 
@@ -72,7 +74,47 @@ const MIGRATIONS: &[&str] = &[
         SELECT m.id, m.title, m.notes_text, m.enhanced_md,
                coalesce((SELECT group_concat(t.text, ' ') FROM transcript_lines t WHERE t.meeting_id = m.id), '')
         FROM meetings m;",
+    // v4: folders. Deleting a folder unfiles its meetings; it never deletes them.
+    "CREATE TABLE folders (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL
+    );
+    ALTER TABLE meetings ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL;
+    CREATE INDEX meetings_by_folder ON meetings(folder_id, started_at_ms DESC);",
 ];
+
+/// Longest folder name, in characters.
+pub const FOLDER_NAME_MAX: usize = 60;
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Folder {
+    pub id: String,
+    pub name: String,
+    pub meeting_count: u32,
+}
+
+/// Trims and checks a folder name typed by the user.
+pub fn clean_folder_name(name: &str) -> Result<String, String> {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    if name.is_empty() {
+        return Err("Give the folder a name.".into());
+    }
+    if name.chars().count() > FOLDER_NAME_MAX {
+        return Err(format!(
+            "Folder names can be up to {FOLDER_NAME_MAX} characters."
+        ));
+    }
+    Ok(name)
+}
+
+/// A random 128-bit id as hex.
+pub fn new_id() -> Result<String, String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| e.to_string())?;
+    Ok(hex(&bytes))
+}
 
 /// Rebuilds one meeting's search row from its current data. Called after every write.
 fn refresh_fts(conn: &Connection, id: &str) -> rusqlite::Result<()> {
@@ -113,6 +155,7 @@ pub struct MeetingSummary {
     pub started_at_ms: i64,
     pub duration_secs: Option<f64>,
     pub has_enhanced: bool,
+    pub folder_id: Option<String>,
     /// For search results: the best-matching passage with highlight markers.
     pub snippet: Option<String>,
 }
@@ -260,7 +303,7 @@ impl Store {
         let meeting = conn
             .query_row(
                 "SELECT id, title, started_at_ms, duration_secs, notes_json, notes_text, updated_at_ms,
-                        enhanced_md, enhanced_template_id, enhanced_at_ms
+                        enhanced_md, enhanced_template_id, enhanced_at_ms, folder_id
                  FROM meetings WHERE id = ?1",
                 params![id],
                 |r| {
@@ -275,6 +318,7 @@ impl Store {
                         enhanced_md: r.get(7)?,
                         enhanced_template_id: r.get(8)?,
                         enhanced_at_ms: r.get(9)?,
+                        folder_id: r.get(10)?,
                         transcript: Vec::new(),
                     })
                 },
@@ -335,23 +379,30 @@ impl Store {
         refresh_fts(&conn, id).map_err(|e| e.to_string())
     }
 
-    /// Most recent first.
-    pub fn list_meetings(&self, limit: u32, offset: u32) -> Result<Vec<MeetingSummary>, String> {
+    /// Most recent first; only the given folder's meetings when `folder` is set.
+    pub fn list_meetings(
+        &self,
+        limit: u32,
+        offset: u32,
+        folder: Option<&str>,
+    ) -> Result<Vec<MeetingSummary>, String> {
         let conn = self.0.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, started_at_ms, duration_secs, enhanced_md != ''
-                 FROM meetings ORDER BY started_at_ms DESC LIMIT ?1 OFFSET ?2",
+                "SELECT id, title, started_at_ms, duration_secs, enhanced_md != '', folder_id
+                 FROM meetings WHERE ?3 IS NULL OR folder_id = ?3
+                 ORDER BY started_at_ms DESC LIMIT ?1 OFFSET ?2",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![limit, offset], |r| {
+            .query_map(params![limit, offset, folder], |r| {
                 Ok(MeetingSummary {
                     id: r.get(0)?,
                     title: r.get(1)?,
                     started_at_ms: r.get(2)?,
                     duration_secs: r.get(3)?,
                     has_enhanced: r.get(4)?,
+                    folder_id: r.get(5)?,
                     snippet: None,
                 })
             })
@@ -361,11 +412,13 @@ impl Store {
 
     /// Ranked full-text search. `any_term` matches meetings with any of the words (for
     /// finding context to answer a question) instead of all of them (the search box).
+    /// `folder` limits the search to one folder.
     pub fn search(
         &self,
         query: &str,
         any_term: bool,
         limit: u32,
+        folder: Option<&str>,
     ) -> Result<Vec<MeetingSummary>, String> {
         let Some(fts) = fts_query(query, any_term) else {
             return Ok(Vec::new());
@@ -373,23 +426,24 @@ impl Store {
         let conn = self.0.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT m.id, m.title, m.started_at_ms, m.duration_secs, m.enhanced_md != '',
+                "SELECT m.id, m.title, m.started_at_ms, m.duration_secs, m.enhanced_md != '', m.folder_id,
                         snippet(meeting_fts, -1, '{HIGHLIGHT_START}', '{HIGHLIGHT_END}', '…', 14)
                  FROM meeting_fts JOIN meetings m ON m.id = meeting_fts.meeting_id
-                 WHERE meeting_fts MATCH ?1
+                 WHERE meeting_fts MATCH ?1 AND (?3 IS NULL OR m.folder_id = ?3)
                  ORDER BY bm25(meeting_fts, 0.0, 5.0, 3.0, 2.0, 1.0)
                  LIMIT ?2"
             ))
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![fts, limit], |r| {
+            .query_map(params![fts, limit, folder], |r| {
                 Ok(MeetingSummary {
                     id: r.get(0)?,
                     title: r.get(1)?,
                     started_at_ms: r.get(2)?,
                     duration_secs: r.get(3)?,
                     has_enhanced: r.get(4)?,
-                    snippet: Some(r.get(5)?),
+                    folder_id: r.get(5)?,
+                    snippet: Some(r.get(6)?),
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -403,6 +457,105 @@ impl Store {
             .map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM meeting_fts WHERE meeting_id = ?1", params![id])
             .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Every folder with its meeting count, sorted by name.
+    pub fn list_folders(&self) -> Result<Vec<Folder>, String> {
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT f.id, f.name, (SELECT count(*) FROM meetings m WHERE m.folder_id = f.id)
+                 FROM folders f ORDER BY f.name COLLATE NOCASE",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(Folder {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    meeting_count: r.get(2)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    }
+
+    fn name_taken(conn: &Connection, name: &str, except_id: &str) -> Result<bool, String> {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM folders WHERE name = ?1 COLLATE NOCASE AND id != ?2)",
+            params![name, except_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    pub fn create_folder(&self, id: &str, name: &str, at_ms: i64) -> Result<Folder, String> {
+        let name = clean_folder_name(name)?;
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        if Self::name_taken(&conn, &name, id)? {
+            return Err(format!("A folder called \"{name}\" already exists."));
+        }
+        conn.execute(
+            "INSERT INTO folders (id, name, created_at_ms) VALUES (?1, ?2, ?3)",
+            params![id, name, at_ms],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(Folder {
+            id: id.into(),
+            name,
+            meeting_count: 0,
+        })
+    }
+
+    pub fn rename_folder(&self, id: &str, name: &str) -> Result<(), String> {
+        let name = clean_folder_name(name)?;
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        if Self::name_taken(&conn, &name, id)? {
+            return Err(format!("A folder called \"{name}\" already exists."));
+        }
+        let changed = conn
+            .execute(
+                "UPDATE folders SET name = ?2 WHERE id = ?1",
+                params![id, name],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            return Err("That folder no longer exists.".into());
+        }
+        Ok(())
+    }
+
+    /// Deletes the folder only; its meetings stay, unfiled.
+    pub fn delete_folder(&self, id: &str) -> Result<(), String> {
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM folders WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Files a meeting in a folder, or takes it out of its folder with `None`.
+    pub fn set_meeting_folder(
+        &self,
+        meeting_id: &str,
+        folder_id: Option<&str>,
+    ) -> Result<(), String> {
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        let changed = conn
+            .execute(
+                "UPDATE meetings SET folder_id = ?2 WHERE id = ?1",
+                params![meeting_id, folder_id],
+            )
+            .map_err(|e| {
+                if e.to_string().contains("FOREIGN KEY") {
+                    "That folder no longer exists.".to_string()
+                } else {
+                    e.to_string()
+                }
+            })?;
+        if changed == 0 {
+            return Err(format!("meeting {meeting_id} not found"));
+        }
         Ok(())
     }
 
@@ -690,17 +843,17 @@ mod tests {
     #[test]
     fn list_is_newest_first_and_flags_enhanced() {
         let (_d, store) = seeded();
-        let list = store.list_meetings(10, 0).unwrap();
+        let list = store.list_meetings(10, 0, None).unwrap();
         let ids: Vec<&str> = list.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["b", "a"]);
         assert!(list[0].has_enhanced && !list[1].has_enhanced);
-        assert_eq!(store.list_meetings(1, 1).unwrap()[0].id, "a");
+        assert_eq!(store.list_meetings(1, 1, None).unwrap()[0].id, "a");
     }
 
     #[test]
     fn search_covers_notes_transcript_and_enhanced_with_highlights() {
         let (_d, store) = seeded();
-        let by_note = store.search("priya", false, 10).unwrap();
+        let by_note = store.search("priya", false, 10, None).unwrap();
         assert_eq!(by_note.len(), 1);
         assert_eq!(by_note[0].id, "a");
         assert!(
@@ -711,22 +864,33 @@ mod tests {
                 .contains("\u{1}Priya\u{2}")
         );
         assert_eq!(
-            store.search("revenue thursday", false, 10).unwrap()[0].id,
+            store.search("revenue thursday", false, 10, None).unwrap()[0].id,
             "a"
         );
-        assert_eq!(store.search("frontend", false, 10).unwrap()[0].id, "b");
+        assert_eq!(
+            store.search("frontend", false, 10, None).unwrap()[0].id,
+            "b"
+        );
         // Prefix matching: "forec" finds "forecast".
-        assert_eq!(store.search("forec", false, 10).unwrap().len(), 1);
+        assert_eq!(store.search("forec", false, 10, None).unwrap().len(), 1);
         // All words must match by default; any_term widens it.
-        assert!(store.search("priya backend", false, 10).unwrap().is_empty());
-        assert_eq!(store.search("priya backend", true, 10).unwrap().len(), 2);
+        assert!(
+            store
+                .search("priya backend", false, 10, None)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store.search("priya backend", true, 10, None).unwrap().len(),
+            2
+        );
     }
 
     #[test]
     fn search_survives_operators_and_punctuation() {
         let (_d, store) = seeded();
         for q in ["\"", "AND OR NOT", "budget*", "(q3", "-", "NEAR(", ""] {
-            assert!(store.search(q, false, 10).is_ok(), "{q:?}");
+            assert!(store.search(q, false, 10, None).is_ok(), "{q:?}");
         }
         assert_eq!(
             fts_query("Q3 budget!", false).unwrap(),
@@ -741,12 +905,12 @@ mod tests {
         store
             .save_notes("a", "Q3 budget sync", "", "Marco owns it now", 3)
             .unwrap();
-        assert!(store.search("priya", false, 10).unwrap().is_empty());
-        assert_eq!(store.search("marco", false, 10).unwrap().len(), 1);
+        assert!(store.search("priya", false, 10, None).unwrap().is_empty());
+        assert_eq!(store.search("marco", false, 10, None).unwrap().len(), 1);
         store.delete_meeting("a").unwrap();
         assert!(store.get_meeting("a").unwrap().is_none());
-        assert!(store.search("revenue", false, 10).unwrap().is_empty());
-        assert_eq!(store.list_meetings(10, 0).unwrap().len(), 1);
+        assert!(store.search("revenue", false, 10, None).unwrap().is_empty());
+        assert_eq!(store.list_meetings(10, 0, None).unwrap().len(), 1);
     }
 
     #[test]
@@ -770,7 +934,138 @@ mod tests {
             .unwrap();
         }
         let store = Store::open(&path, &KEY).unwrap();
-        assert_eq!(store.search("renewal", false, 10).unwrap()[0].id, "old");
+        assert_eq!(
+            store.search("renewal", false, 10, None).unwrap()[0].id,
+            "old"
+        );
+    }
+
+    #[test]
+    fn folders_file_meetings_and_scope_list_and_search() {
+        let (_dir, store) = seeded();
+        let acme = store.create_folder("f1", "  Acme   renewal ", 10).unwrap();
+        assert_eq!(acme.name, "Acme renewal");
+        store.create_folder("f2", "Hiring", 11).unwrap();
+        store.set_meeting_folder("a", Some("f1")).unwrap();
+        store.set_meeting_folder("b", Some("f2")).unwrap();
+
+        let in_acme = store.list_meetings(10, 0, Some("f1")).unwrap();
+        assert_eq!(
+            in_acme.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["a"]
+        );
+        assert_eq!(in_acme[0].folder_id.as_deref(), Some("f1"));
+        assert_eq!(store.list_meetings(10, 0, None).unwrap().len(), 2);
+        assert_eq!(
+            store
+                .get_meeting("a")
+                .unwrap()
+                .unwrap()
+                .folder_id
+                .as_deref(),
+            Some("f1")
+        );
+
+        // "priya backend" matches both meetings with any_term; the folder narrows it to one.
+        assert_eq!(
+            store.search("priya backend", true, 10, None).unwrap().len(),
+            2
+        );
+        let scoped = store.search("priya backend", true, 10, Some("f2")).unwrap();
+        assert_eq!(
+            scoped.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["b"]
+        );
+
+        let folders = store.list_folders().unwrap();
+        assert_eq!(
+            folders
+                .iter()
+                .map(|f| (f.name.as_str(), f.meeting_count))
+                .collect::<Vec<_>>(),
+            [("Acme renewal", 1), ("Hiring", 1)]
+        );
+
+        store.set_meeting_folder("a", None).unwrap();
+        assert!(store.list_meetings(10, 0, Some("f1")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn folder_names_are_cleaned_unique_and_renamable() {
+        let (_dir, store) = seeded();
+        store.create_folder("f1", "Acme", 1).unwrap();
+        assert!(
+            store
+                .create_folder("f2", "acme", 2)
+                .unwrap_err()
+                .contains("already exists")
+        );
+        assert!(store.create_folder("f2", "   ", 2).is_err());
+        assert!(
+            store
+                .create_folder("f2", &"x".repeat(FOLDER_NAME_MAX + 1), 2)
+                .is_err()
+        );
+        // Renaming to its own name in a different case is fine; to another folder's name is not.
+        store.rename_folder("f1", "ACME").unwrap();
+        store.create_folder("f2", "Globex", 2).unwrap();
+        assert!(store.rename_folder("f2", "acme").is_err());
+        assert!(store.rename_folder("missing", "New").is_err());
+        assert_eq!(store.list_folders().unwrap()[0].name, "ACME");
+    }
+
+    #[test]
+    fn deleting_a_folder_keeps_its_meetings() {
+        let (_dir, store) = seeded();
+        store.create_folder("f1", "Acme", 1).unwrap();
+        store.set_meeting_folder("a", Some("f1")).unwrap();
+        store.delete_folder("f1").unwrap();
+        let a = store.get_meeting("a").unwrap().unwrap();
+        assert_eq!(a.folder_id, None);
+        assert_eq!(store.list_meetings(10, 0, None).unwrap().len(), 2);
+        assert!(store.list_folders().unwrap().is_empty());
+        // Filing into a folder that is gone fails cleanly instead of leaving a dangling id.
+        assert!(
+            store
+                .set_meeting_folder("a", Some("f1"))
+                .unwrap_err()
+                .contains("no longer exists")
+        );
+        assert!(store.set_meeting_folder("missing", None).is_err());
+    }
+
+    #[test]
+    fn migration_v4_adds_folders_to_an_existing_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("parley.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";", hex(&KEY)))
+                .unwrap();
+            conn.execute_batch(&format!(
+                "BEGIN; {}; {}; {}; PRAGMA user_version = 3; COMMIT;",
+                MIGRATIONS[0], MIGRATIONS[1], MIGRATIONS[2]
+            ))
+            .unwrap();
+            conn.execute(
+                "INSERT INTO meetings (id, title, started_at_ms, updated_at_ms) VALUES ('old', 'Vendor review', 1, 1)",
+                [],
+            )
+            .unwrap();
+        }
+        let store = Store::open(&path, &KEY).unwrap();
+        assert_eq!(store.get_meeting("old").unwrap().unwrap().folder_id, None);
+        store.create_folder("f1", "Vendors", 2).unwrap();
+        store.set_meeting_folder("old", Some("f1")).unwrap();
+        assert_eq!(store.list_folders().unwrap()[0].meeting_count, 1);
+    }
+
+    #[test]
+    fn new_ids_are_random_hex() {
+        let a = new_id().unwrap();
+        assert_eq!(a.len(), 32);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, new_id().unwrap());
     }
 
     #[test]

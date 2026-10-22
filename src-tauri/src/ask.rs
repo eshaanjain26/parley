@@ -193,6 +193,7 @@ mod tests {
             enhanced_md: enhanced.into(),
             enhanced_template_id: String::new(),
             enhanced_at_ms: None,
+            folder_id: None,
             transcript: lines,
         }
     }

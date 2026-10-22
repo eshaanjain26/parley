@@ -358,16 +358,53 @@ fn list_meetings(
     store: State<'_, StoreState>,
     limit: u32,
     offset: u32,
+    folder_id: Option<String>,
 ) -> Result<Vec<store::MeetingSummary>, String> {
-    store.get()?.list_meetings(limit, offset)
+    store
+        .get()?
+        .list_meetings(limit, offset, folder_id.as_deref())
 }
 
 #[tauri::command]
 fn search_meetings(
     store: State<'_, StoreState>,
     query: String,
+    folder_id: Option<String>,
 ) -> Result<Vec<store::MeetingSummary>, String> {
-    store.get()?.search(&query, false, 50)
+    store.get()?.search(&query, false, 50, folder_id.as_deref())
+}
+
+#[tauri::command]
+fn list_folders(store: State<'_, StoreState>) -> Result<Vec<store::Folder>, String> {
+    store.get()?.list_folders()
+}
+
+#[tauri::command]
+fn create_folder(store: State<'_, StoreState>, name: String) -> Result<store::Folder, String> {
+    store
+        .get()?
+        .create_folder(&store::new_id()?, &name, now_ms()?)
+}
+
+#[tauri::command]
+fn rename_folder(store: State<'_, StoreState>, id: String, name: String) -> Result<(), String> {
+    store.get()?.rename_folder(&id, &name)
+}
+
+#[tauri::command]
+fn delete_folder(store: State<'_, StoreState>, id: String) -> Result<(), String> {
+    store.get()?.delete_folder(&id)
+}
+
+#[tauri::command]
+fn set_meeting_folder(
+    store: State<'_, StoreState>,
+    meeting_id: String,
+    folder_id: Option<String>,
+) -> Result<(), String> {
+    store
+        .get()?
+        .set_meeting_folder(&meeting_id, folder_id.as_deref())
 }
 
 /// Deletes a meeting from the database and removes its recording folder (logs, and audio if
@@ -423,15 +460,22 @@ async fn ask_meetings(
     running: State<'_, EnhanceState>,
     question: String,
     utc_offset_minutes: i32,
+    folder_id: Option<String>,
 ) -> Result<Answer, String> {
     let store = store.get()?;
     if question.trim().is_empty() {
         return Err("Type a question first.".into());
     }
-    let mut hits = store.search(&ask::keywords(&question).join(" "), true, ASK_MEETINGS)?;
+    let folder = folder_id.as_deref();
+    let mut hits = store.search(
+        &ask::keywords(&question).join(" "),
+        true,
+        ASK_MEETINGS,
+        folder,
+    )?;
     if hits.is_empty() {
         // Nothing matched any word: give the model the most recent meetings to work from.
-        hits = store.list_meetings(ASK_MEETINGS, 0)?;
+        hits = store.list_meetings(ASK_MEETINGS, 0, folder)?;
     }
     let meetings: Vec<store::Meeting> = hits
         .iter()
@@ -888,6 +932,11 @@ pub fn run() {
             enhance_meeting,
             cancel_enhance,
             list_meetings,
+            list_folders,
+            create_folder,
+            rename_folder,
+            delete_folder,
+            set_meeting_folder,
             search_meetings,
             delete_meeting,
             ask_meetings,

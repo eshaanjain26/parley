@@ -2,6 +2,7 @@ import { CalendarDays, ChevronLeft, Clock, Ellipsis, FileDown, FileText, Message
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AskBar } from "./AskBar";
+import { FolderChip } from "./Folders";
 import { MeetingNotes } from "./MeetingNotes";
 import { Menu } from "./Menu";
 import { Transcript } from "./Recorder";
@@ -145,6 +146,11 @@ export function MeetingPage({ id, onBack, onDeleted, onAsk }: Props) {
                 canEnhance
                 meta={
                   <>
+                    <FolderChip
+                      meetingId={meeting.id}
+                      folderId={meeting.folderId}
+                      onChange={(folderId) => setMeeting({ ...meeting, folderId })}
+                    />
                     <span className="chip static">
                       <CalendarDays size={14} aria-hidden />
                       {dayLabel(meeting.startedAtMs)}, {timeOfDay(meeting.startedAtMs)}
