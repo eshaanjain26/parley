@@ -17,7 +17,7 @@ This page lists everything Parley stores and every place it can send data, so yo
 | Speech models | Same folder, `models/` | Public model files. |
 | Calendar link on a recording | Inside the encrypted database: the event's id and the names and email addresses of the people invited | Encrypted with everything else. Only for meetings you record. |
 
-If you connect your calendar, Parley reads events from the macOS Calendar on this Mac (which includes Google, Outlook and iCloud accounts added to the Mac) to show upcoming meetings and to name recordings. It reads; it never changes events, and it doesn't contact any calendar server itself. You can turn calendar access off in Settings, or for good in System Settings > Privacy & Security > Calendars.
+If you connect your calendar, Parley reads events from the macOS Calendar on this Mac (which includes Google, Outlook and iCloud accounts added to the Mac) to show upcoming meetings and to name recordings. It reads; it never changes events, and it doesn't contact any calendar server itself. Invite text is scanned on the Mac for a Zoom, Teams, Meet or Webex link and then discarded; Join opens that link in its own app or browser. You can turn calendar access off in Settings, or for good in System Settings > Privacy & Security > Calendars.
 
 Meeting detection reads the list of apps that are using the microphone from macOS. It doesn't record or listen to anything; recording starts only when you start it.
 

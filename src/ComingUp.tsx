@@ -1,7 +1,16 @@
-import { CalendarDays, Mic, Users, X } from "lucide-react";
+import { CalendarDays, Mic, Users, Video, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useRecording } from "./RecordingContext";
-import { CalendarEvent, attendeeSummary, canRecordNow, connectCalendar, startsIn, timeRange, upcomingEvents } from "./lib/calendar";
+import {
+  CalendarEvent,
+  PROVIDER_LABELS,
+  attendeeSummary,
+  canRecordNow,
+  connectCalendar,
+  startsIn,
+  timeRange,
+  upcomingEvents,
+} from "./lib/calendar";
 import { daysAgo } from "./lib/dates";
 import { Settings, getSettings } from "./lib/settings";
 
@@ -125,6 +134,12 @@ export function ComingUp({ onOpenSettings }: { onOpenSettings: () => void }) {
                           <span className="event-title">{e.title || "Untitled event"}</span>
                           <span className="event-meta">
                             {timeRange(e)}
+                            {e.callLink && (
+                              <>
+                                <Video size={13} aria-hidden />
+                                <span>{PROVIDER_LABELS[e.callLink.provider]}</span>
+                              </>
+                            )}
                             {people && (
                               <>
                                 <Users size={13} aria-hidden />
@@ -133,7 +148,18 @@ export function ComingUp({ onOpenSettings }: { onOpenSettings: () => void }) {
                             )}
                           </span>
                         </div>
-                        {live ? (
+                        {live && e.callLink ? (
+                          <div className="event-actions">
+                            <button className="secondary" disabled={busy} onClick={() => void rec.start(null, e)} aria-label={`Record ${e.title} without joining`}>
+                              <Mic size={15} aria-hidden />
+                              Record
+                            </button>
+                            <button className="primary" disabled={busy} onClick={() => void rec.join(e)}>
+                              <Video size={15} aria-hidden />
+                              Join
+                            </button>
+                          </div>
+                        ) : live ? (
                           <button className="primary" disabled={busy} onClick={() => void rec.start(null, e)}>
                             <Mic size={15} aria-hidden />
                             Record

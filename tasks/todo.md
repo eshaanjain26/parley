@@ -250,3 +250,13 @@ Speaker names, on-device diarization, Windows, integrations (Slack, Notion, CRM)
 - Build: `[lib] crate-type` is now `rlib` only. The template's staticlib and cdylib are for mobile targets and cost ~330 MB per build on a nearly full disk.
 - Tests: Rust 104 (7 new), Vitest 45 (3 new).
 - Not checked in the app (disk full): the macOS prompt, real calendar data, the Coming up layout.
+
+### Meeting apps (PR C, 2026-10-22, not yet checked in the app)
+
+- `links`: call-link extraction from an event's URL, then location, then notes. Unwraps Outlook safe links and Google redirects; accepts only https join links on Zoom (`/j/`, `/my/`, `/w/`, incl. zoomgov), Teams (`/l/meetup-join/`, teams.live.com `/meet/`), Meet (`meet.google.com/<code>`) and Webex hosts; rejects look-alike hosts, userinfo, ports, other schemes and non-join pages. Links are computed in Rust; a `callLink` in helper input is ignored.
+- `join_call` re-validates the link and opens it with `/usr/bin/open`, then records the event and follows its provider's apps (browsers count for all four).
+- `autorec`: reminders 75 s before events with a call link, once each; auto-start when a detected meeting app runs the current event's provider; `CallWatch` stops 30 s after the followed app leaves the mic, resets if it comes back, and ignores absence until the app has joined once.
+- Watcher: with "Record calls automatically" on, a matching detection sends a "Recording ..." notification and an `auto-record` event instead of the prompt; the UI starts, then asks the backend to follow that app. A countdown toast offers Keep recording or Stop now. Stopping in any way clears the watch.
+- Settings > Calendar: reminders (on by default), automatic recording (off by default, with a note to tell people on the call).
+- Tests: Rust 115 (11 new), Vitest 45.
+- Not checked in the app (disk full).

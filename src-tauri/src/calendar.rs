@@ -35,6 +35,9 @@ pub struct CalendarEvent {
     /// Invite text, used only to find call links. Never sent to the interface or stored.
     #[serde(default, skip_serializing)]
     pub notes: String,
+    /// The video-call link, found in the URL, location or notes.
+    #[serde(default)]
+    pub call_link: Option<crate::links::CallLink>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -87,8 +90,15 @@ pub fn parse_status(stdout: &str) -> Result<String, String> {
         .map_err(|e| format!("unexpected calendar status: {e}"))
 }
 
+/// Parses the helper's events and finds each one's call link. Any `callLink` in the input is
+/// ignored: links come only from our own extraction.
 pub fn parse_events(stdout: &str) -> Result<Vec<CalendarEvent>, String> {
-    serde_json::from_str(stdout.trim()).map_err(|e| format!("unexpected calendar data: {e}"))
+    let mut events: Vec<CalendarEvent> = serde_json::from_str(stdout.trim())
+        .map_err(|e| format!("unexpected calendar data: {e}"))?;
+    for e in &mut events {
+        e.call_link = crate::links::find(&e.url, &e.location, &e.notes);
+    }
+    Ok(events)
 }
 
 /// "fullAccess", "notDetermined", "denied", "restricted" or "writeOnly".
@@ -156,6 +166,7 @@ mod tests {
             url: String::new(),
             location: String::new(),
             notes: String::new(),
+            call_link: None,
         }
     }
 
@@ -169,9 +180,22 @@ mod tests {
         assert_eq!(events[0].series_id.as_deref(), Some("abc"));
         assert_eq!(events[0].attendees[0].email, "priya@example.com");
         assert!(events[0].notes.contains("example.com"));
+        // example.com isn't a call provider, so no link.
+        assert_eq!(events[0].call_link, None);
         let wire = serde_json::to_value(&events[0]).unwrap();
         assert!(wire.get("notes").is_none());
         assert_eq!(wire["startMs"], 1000);
+        let with_call = parse_events(
+            r#"[{"id":"x:1","seriesId":null,"calendarId":"w","title":"Sync","startMs":1,"endMs":2,"allDay":false,
+                "notes":"Join https://meet.google.com/abc-defg-hij","callLink":{"provider":"zoom","url":"https://evil.example"}}]"#,
+        )
+        .unwrap();
+        let link = with_call[0].call_link.as_ref().unwrap();
+        assert_eq!(link.url, "https://meet.google.com/abc-defg-hij");
+        assert_eq!(
+            serde_json::to_value(&with_call[0]).unwrap()["callLink"]["provider"],
+            "meet"
+        );
     }
 
     #[test]

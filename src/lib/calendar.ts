@@ -1,10 +1,25 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
 
 // Mirrors src-tauri/src/calendar.rs.
 export interface Attendee {
   name: string;
   email: string;
 }
+
+export type Provider = "zoom" | "teams" | "meet" | "webex";
+
+export interface CallLink {
+  provider: Provider;
+  url: string;
+}
+
+export const PROVIDER_LABELS: Record<Provider, string> = {
+  zoom: "Zoom",
+  teams: "Teams",
+  meet: "Google Meet",
+  webex: "Webex",
+};
 
 export interface CalendarEvent {
   id: string;
@@ -17,6 +32,8 @@ export interface CalendarEvent {
   attendees: Attendee[];
   url: string;
   location: string;
+  /** The video-call link found in the invite, if any. */
+  callLink: CallLink | null;
 }
 
 export interface CalendarInfo {
@@ -37,6 +54,27 @@ export const currentEvent = () => invoke<CalendarEvent | null>("current_event");
 /** Returns the folder the meeting was filed in, when a repeating event decided one. */
 export const linkMeetingEvent = (meetingId: string, event: CalendarEvent) =>
   invoke<string | null>("link_meeting_event", { meetingId, event });
+
+/** Opens the call in its app or browser (only links the backend recognises). */
+export const joinCall = (url: string) => invoke<Provider>("join_call", { url });
+/** Follows the call's app so the recording can stop when the call ends (if automatic recording is on). */
+export const followCall = (target: { bundleId?: string; provider?: Provider }) =>
+  invoke<void>("follow_call", { bundleId: target.bundleId ?? null, provider: target.provider ?? null });
+export const keepRecording = () => invoke<void>("keep_recording");
+
+export interface AutoRecord {
+  event: CalendarEvent;
+  bundleId: string;
+  appName: string;
+}
+/** A calendar call's app joined and automatic recording is on. */
+export const onAutoRecord = (cb: (a: AutoRecord) => void): Promise<UnlistenFn> => listen<AutoRecord>("auto-record", (e) => cb(e.payload));
+
+export interface CallChange {
+  kind: "ended" | "resumed" | "stop";
+  seconds: number;
+}
+export const onCallChange = (cb: (c: CallChange) => void): Promise<UnlistenFn> => listen<CallChange>("call-change", (e) => cb(e.payload));
 
 /** Mirrors calendar::EARLY_START_MS: how early a recording can start and still belong to an event. */
 export const EARLY_START_MS = 10 * 60 * 1000;

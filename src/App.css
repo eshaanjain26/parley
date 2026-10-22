@@ -277,6 +277,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .event-meta { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--muted); min-width: 0; }
 .event-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .event-meta svg { flex-shrink: 0; margin-left: var(--space-2); }
+.event-actions { display: flex; gap: var(--space-2); }
 .event-when { font-size: var(--text-sm); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .search-field {
@@ -334,6 +335,17 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .ask-bar input:focus-visible { box-shadow: none; }
 .ask-bar.inline { box-shadow: var(--shadow-raised); padding-left: var(--space-4); margin-bottom: var(--space-4); max-width: none; }
 .field-icon { color: var(--muted); flex-shrink: 0; }
+
+/* Toast: the call ended and an automatic stop is counting down */
+.toast {
+  position: absolute; z-index: 30; top: var(--space-4); left: 0; right: 0; margin: 0 auto; width: fit-content;
+  display: flex; align-items: center; gap: var(--space-3); max-width: calc(100% - 2 * var(--space-6));
+  background: var(--raised); border: 1px solid var(--hairline-strong); border-radius: var(--radius-lg);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); box-shadow: var(--shadow-float);
+  animation: pop 160ms var(--ease-out) both;
+}
+.toast svg { color: var(--accent); flex-shrink: 0; }
+.toast p { margin: 0; font-size: var(--text-sm); }
 
 /* Menus */
 .menu-root { position: relative; display: inline-flex; }

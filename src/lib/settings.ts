@@ -22,6 +22,10 @@ export interface Settings {
   calendarEnabled: boolean;
   /** Calendars to read; empty means all of them. */
   calendarIds: string[];
+  /** A notification shortly before events that have a call link. */
+  eventReminders: boolean;
+  /** Start recording when a calendar call's app joins, and stop after it leaves. */
+  autoRecord: boolean;
 }
 
 export interface AppInfo {

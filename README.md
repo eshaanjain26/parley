@@ -16,6 +16,7 @@ By default nothing leaves your Mac: whisper.cpp transcribes on device and Ollama
 - **Notes beside the transcript.** Type rough notes while you listen. After the meeting, Enhance rewrites them with detail from the transcript using a template: general meeting, 1:1, sales call, standup, or your own.
 - **Folders.** Group meetings by client, team or project; search and Ask within a folder.
 - **Calendar.** Upcoming meetings from the calendars on your Mac (Google, Outlook and iCloud included). Recordings take the event's title and attendees, and a weekly meeting files itself into the folder you used last time.
+- **Zoom, Teams, Google Meet and Webex.** Join a call and start notes in one click, get a reminder a minute before, or let Parley start recording when the call's app joins and stop when it leaves. Parley works from your Mac's audio, so no bot joins and no account is connected.
 - **Library and search.** Every meeting is searchable by title, notes and transcript.
 - **Ask your meetings.** Ask a question across past meetings and get an answer with numbered sources you can open.
 - **Export.** Markdown file or PDF.
