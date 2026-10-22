@@ -13,6 +13,7 @@ export interface Meeting {
   enhancedMd: string;
   enhancedTemplateId: string;
   enhancedAtMs: number | null;
+  folderId: string | null;
   transcript: TranscriptLine[];
 }
 

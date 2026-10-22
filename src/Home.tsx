@@ -1,7 +1,10 @@
-import { FileText, Mic, Search, Sparkles, Square, X } from "lucide-react";
+import { Ellipsis, FileText, Folder as FolderIcon, Mic, Pencil, Search, Sparkles, Square, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AskBar } from "./AskBar";
+import { FolderNameForm, useFolders } from "./Folders";
+import { Menu } from "./Menu";
 import { useRecording } from "./RecordingContext";
+import { Folder, checkFolderName, deleteFolder, renameFolder } from "./lib/folders";
 import { greeting, groupByDay, longDate, timeOfDay } from "./lib/dates";
 import { MeetingDetected, MeetingSummary, formatMinutes, listMeetings, onStoreReady, searchMeetings, splitSnippet } from "./lib/library";
 import { formatDuration } from "./lib/recording";
@@ -15,10 +18,17 @@ interface Props {
   onAsk: (question: string) => void;
   /** Changes when ⌘K asks for the search box. */
   focusSearch: number;
+  /** Set on a folder's page: everything here is scoped to it. */
+  folder?: Folder;
+  onFolderDeleted?: () => void;
 }
 
-export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpenRecording, onAsk, focusSearch }: Props) {
+export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpenRecording, onAsk, focusSearch, folder, onFolderDeleted }: Props) {
   const rec = useRecording();
+  const folders = useFolders();
+  const folderId = folder?.id ?? null;
+  const [renaming, setRenaming] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [meetings, setMeetings] = useState<MeetingSummary[] | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<MeetingSummary[] | null>(null);
@@ -26,13 +36,13 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
   const search = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
-    listMeetings()
+    listMeetings(folderId)
       .then((m) => {
         setMeetings(m);
         setError(null);
       })
       .catch((e) => setError(String(e)));
-  }, []);
+  }, [folderId]);
 
   useEffect(() => {
     refresh();
@@ -56,10 +66,22 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
       return;
     }
     const t = setTimeout(() => {
-      searchMeetings(q).then(setResults).catch((e) => setError(String(e)));
+      searchMeetings(q, folderId).then(setResults).catch((e) => setError(String(e)));
     }, 200);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, folderId]);
+
+  const removeFolder = async () => {
+    if (!folder) return;
+    try {
+      await deleteFolder(folder.id);
+      folders.refresh();
+      onFolderDeleted?.();
+    } catch (e) {
+      setError(String(e));
+      setConfirmDelete(false);
+    }
+  };
 
   const shown = results ?? meetings ?? [];
   const groups = groupByDay(shown);
@@ -69,10 +91,56 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
   return (
     <div className="page home">
       <div className="page-scroll">
-        <header className="page-header">
-          <p className="eyebrow">{longDate(now)}</p>
-          <h1 className="display">{greeting(now)}</h1>
-        </header>
+        {folder ? (
+          <header className="page-header folder-header">
+            <p className="eyebrow">
+              <FolderIcon size={14} aria-hidden />
+              Folder · {folder.meetingCount} {folder.meetingCount === 1 ? "meeting" : "meetings"}
+            </p>
+            {renaming ? (
+              <FolderNameForm
+                initial={folder.name}
+                submitLabel="Rename"
+                onCancel={() => setRenaming(false)}
+                onSubmit={async (name) => {
+                  const checked = checkFolderName(name, folders.folders, folder.id);
+                  if ("error" in checked) throw checked.error;
+                  await renameFolder(folder.id, checked.name);
+                  folders.refresh();
+                  setRenaming(false);
+                }}
+              />
+            ) : (
+              <div className="title-row">
+                <h1 className="display">{folder.name}</h1>
+                <Menu
+                  label="Folder actions"
+                  align="end"
+                  triggerClassName="icon-button"
+                  trigger={<Ellipsis size={18} aria-hidden />}
+                  items={[
+                    { label: "Rename folder", icon: <Pencil size={16} />, onSelect: () => setRenaming(true) },
+                    "separator",
+                    { label: "Delete folder", icon: <Trash2 size={16} />, danger: true, onSelect: () => setConfirmDelete(true) },
+                  ]}
+                />
+              </div>
+            )}
+            {confirmDelete && (
+              <div className="confirm inline" role="alertdialog" aria-labelledby="folder-confirm">
+                <Trash2 size={18} aria-hidden />
+                <p id="folder-confirm">Delete the folder “{folder.name}”? Its meetings stay in your library, just without a folder.</p>
+                <button className="secondary" onClick={() => setConfirmDelete(false)} autoFocus>Cancel</button>
+                <button className="danger" onClick={removeFolder}>Delete folder</button>
+              </div>
+            )}
+          </header>
+        ) : (
+          <header className="page-header">
+            <p className="eyebrow">{longDate(now)}</p>
+            <h1 className="display">{greeting(now)}</h1>
+          </header>
+        )}
 
         {recordingId ? (
           <section className="hero-card recording" aria-label="Recording in progress">
@@ -101,7 +169,7 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
               className="primary"
               onClick={() => {
                 onDismissDetected();
-                void rec.start();
+                void rec.start(folderId);
               }}
               disabled={rec.phase === "starting"}
             >
@@ -113,12 +181,12 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
           <section className="hero-card" aria-label="New recording">
             <span className="hero-icon" aria-hidden><Mic size={20} /></span>
             <div className="hero-text">
-              <strong>Ready for your next meeting</strong>
+              <strong>{folder ? `Record a meeting in ${folder.name}` : "Ready for your next meeting"}</strong>
               <span className="muted">
                 Start when the call begins, or press <kbd>{hotkey}</kbd> from any app.
               </span>
             </div>
-            <button className="primary" onClick={() => void rec.start()} disabled={rec.phase === "starting"}>
+            <button className="primary" onClick={() => void rec.start(folderId)} disabled={rec.phase === "starting"}>
               <Mic size={16} aria-hidden />
               {rec.phase === "starting" ? "Starting…" : "Start recording"}
             </button>
@@ -133,7 +201,7 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
             spellCheck={false}
             autoCorrect="off"
             autoCapitalize="off"
-            placeholder="Search titles, notes and transcripts"
+            placeholder={folder ? `Search in ${folder.name}` : "Search titles, notes and transcripts"}
             aria-label="Search meetings"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -152,6 +220,11 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
           <div className="empty-state">
             {results ? (
               <p>Nothing matches “{query.trim()}”. Try a name, a topic or a phrase someone said.</p>
+            ) : folder ? (
+              <>
+                <p className="empty-title">Nothing in {folder.name} yet</p>
+                <p className="muted">Record here, or open a meeting and pick this folder from its folder chip.</p>
+              </>
             ) : (
               <>
                 <p className="empty-title">Your meetings will live here</p>
@@ -166,6 +239,7 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
               <ul className="meeting-list">
                 {g.items.map((m) => {
                   const live = m.id === recordingId;
+                  const sub = [!folder && folders.byId(m.folderId)?.name, m.hasEnhanced && "AI notes ready"].filter(Boolean).join(" · ");
                   return (
                     <li key={m.id}>
                       <button className="meeting-row" onClick={() => (live ? onOpenRecording() : onOpenMeeting(m.id))}>
@@ -179,7 +253,7 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
                               {splitSnippet(m.snippet).map((p, i) => (p.hit ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
                             </span>
                           ) : (
-                            m.hasEnhanced && <span className="row-sub">AI notes ready</span>
+                            sub && <span className="row-sub">{sub}</span>
                           )}
                         </span>
                         <span className="row-meta">
@@ -195,7 +269,7 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
           ))
         )}
       </div>
-      <AskBar onAsk={onAsk} />
+      <AskBar onAsk={onAsk} placeholder={folder ? `Ask about ${folder.name}` : undefined} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { ChevronLeft, Mic, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { FolderChip } from "./Folders";
 import { MeetingNotes } from "./MeetingNotes";
 import { useRecording } from "./RecordingContext";
 import { dbToPercent, formatDuration } from "./lib/recording";
@@ -107,6 +108,7 @@ export function RecordingPage({ onBack }: { onBack: () => void }) {
               enhancedMd=""
               enhancedTemplateId=""
               canEnhance={false}
+              meta={<FolderChip meetingId={rec.meeting.id} folderId={rec.meeting.folderId} onChange={rec.setFolder} />}
             />
           </div>
         </div>

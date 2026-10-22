@@ -3,6 +3,7 @@ import { AudioLevels, onAudioLevels, onToggleRecording, startRecording, stopReco
 import { MODEL_MISSING, ModelStatus, TranscriptLine, applyLine, listModels, onTranscriptError, onTranscriptLine } from "./lib/transcript";
 import { missingKeyMessage } from "./lib/settings";
 import { defaultTitle } from "./lib/meetings";
+import { setMeetingFolder } from "./lib/folders";
 
 export type Phase = "idle" | "starting" | "recording" | "stopping";
 
@@ -11,17 +12,20 @@ export const SILENT: AudioLevels = { micDbfs: -100, systemDbfs: -100, seconds: 0
 export interface Recording {
   phase: Phase;
   /** The meeting being recorded. */
-  meeting: { id: string; title: string } | null;
+  meeting: { id: string; title: string; folderId: string | null } | null;
   levels: AudioLevels;
   lines: TranscriptLine[];
   warning: string | null;
   error: string | null;
   /** Set when the speech model must be downloaded before recording can start. */
   missingModel: ModelStatus | null;
-  start: () => Promise<void>;
+  /** Starts recording; with `folderId` the new meeting is filed there straight away. */
+  start: (folderId?: string | null) => Promise<void>;
   stop: () => Promise<void>;
   toggle: () => void;
   clearMissingModel: () => void;
+  /** Keeps the recording's folder in step after the user moves it. */
+  setFolder: (folderId: string | null) => void;
 }
 
 const Ctx = createContext<Recording | null>(null);
@@ -66,7 +70,7 @@ export function RecordingProvider({ children, onStarted, onNeedsAttention, onFin
     };
   }, [phase]);
 
-  const start = async () => {
+  const start = async (folderId: string | null = null) => {
     setError(null);
     setWarning(null);
     setLevels(SILENT);
@@ -81,7 +85,15 @@ export function RecordingProvider({ children, onStarted, onNeedsAttention, onFin
         started.micWarning && `Echo cancellation is off (${started.micWarning}). Use headphones, or the call may also appear under "You".`,
       ].filter(Boolean);
       setWarning(notes.length ? notes.join(" ") : null);
-      setMeeting({ id: started.id, title });
+      let filed: string | null = null;
+      if (folderId) {
+        // Recording has started either way; a failed filing only leaves the meeting unfiled.
+        filed = await setMeetingFolder(started.id, folderId).then(
+          () => folderId,
+          () => null,
+        );
+      }
+      setMeeting({ id: started.id, title, folderId: filed });
       setPhase("recording");
       callbacks.current.onStarted();
     } catch (e) {
@@ -140,6 +152,7 @@ export function RecordingProvider({ children, onStarted, onNeedsAttention, onFin
     stop,
     toggle: () => toggleRef.current(),
     clearMissingModel: () => setMissingModel(null),
+    setFolder: (folderId) => setMeeting((m) => (m ? { ...m, folderId } : m)),
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
