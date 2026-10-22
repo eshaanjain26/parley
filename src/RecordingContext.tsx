@@ -4,7 +4,16 @@ import { MODEL_MISSING, ModelStatus, TranscriptLine, applyLine, listModels, onTr
 import { missingKeyMessage } from "./lib/settings";
 import { defaultTitle } from "./lib/meetings";
 import { setMeetingFolder } from "./lib/folders";
-import { CalendarEvent, currentEvent, linkMeetingEvent } from "./lib/calendar";
+import {
+  CalendarEvent,
+  currentEvent,
+  followCall,
+  joinCall,
+  keepRecording,
+  linkMeetingEvent,
+  onAutoRecord,
+  onCallChange,
+} from "./lib/calendar";
 
 /** The calendar lookup must never hold up a recording for long. */
 const EVENT_LOOKUP_MS = 1500;
@@ -32,7 +41,13 @@ export interface Recording {
    * Starts recording. With `folderId` the meeting is filed there. With `event` (or, without one,
    * the calendar event happening now) the meeting takes the event's title and attendees.
    */
-  start: (folderId?: string | null, event?: CalendarEvent | null) => Promise<void>;
+  start: (folderId?: string | null, event?: CalendarEvent | null) => Promise<boolean>;
+  /** Opens the event's call and records it, following the call so it can stop on its own. */
+  join: (event: CalendarEvent) => Promise<void>;
+  /** Set while the call has ended and an automatic stop is counting down. */
+  callEndsAt: number | null;
+  /** Cancels the automatic stop. */
+  keep: () => void;
   stop: () => Promise<void>;
   toggle: () => void;
   clearMissingModel: () => void;
@@ -67,6 +82,7 @@ export function RecordingProvider({ children, onStarted, onNeedsAttention, onFin
   const [warning, setWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [missingModel, setMissingModel] = useState<ModelStatus | null>(null);
+  const [callEndsAt, setCallEndsAt] = useState<number | null>(null);
   const callbacks = useRef({ onStarted, onNeedsAttention, onFinished });
   callbacks.current = { onStarted, onNeedsAttention, onFinished };
 
@@ -113,7 +129,9 @@ export function RecordingProvider({ children, onStarted, onNeedsAttention, onFin
       }
       setMeeting({ id: started.id, title, folderId: filed });
       setPhase("recording");
+      setCallEndsAt(null);
       callbacks.current.onStarted();
+      return true;
     } catch (e) {
       const message = String(e);
       const keyMessage = missingKeyMessage(message);
@@ -127,10 +145,31 @@ export function RecordingProvider({ children, onStarted, onNeedsAttention, onFin
       }
       setPhase("idle");
       callbacks.current.onNeedsAttention();
+      return false;
     }
   };
 
+  const join = async (event: CalendarEvent) => {
+    if (!event.callLink) return;
+    try {
+      await joinCall(event.callLink.url);
+    } catch (e) {
+      setError(String(e));
+      callbacks.current.onNeedsAttention();
+      return;
+    }
+    if (phase === "idle" && (await start(null, event))) {
+      await followCall({ provider: event.callLink.provider }).catch(() => {});
+    }
+  };
+
+  const keep = () => {
+    setCallEndsAt(null);
+    void keepRecording();
+  };
+
   const stop = async () => {
+    setCallEndsAt(null);
     setPhase("stopping");
     try {
       const saved = await stopRecording();
@@ -151,10 +190,24 @@ export function RecordingProvider({ children, onStarted, onNeedsAttention, onFin
     if (phase === "recording") void stop();
     else if (phase === "idle") void start();
   };
+  // Automatic recording: the backend saw a calendar call's app join (or leave) the call.
+  const autoRef = useRef({ start, stop, phase });
+  autoRef.current = { start, stop, phase };
   useEffect(() => {
-    const sub = onToggleRecording(() => toggleRef.current());
+    const subs = [
+      onToggleRecording(() => toggleRef.current()),
+      onAutoRecord(async ({ event, bundleId }) => {
+        if (autoRef.current.phase !== "idle") return;
+        if (await autoRef.current.start(null, event)) await followCall({ bundleId }).catch(() => {});
+      }),
+      onCallChange((c) => {
+        if (c.kind === "ended") setCallEndsAt(Date.now() + c.seconds * 1000);
+        else if (c.kind === "resumed") setCallEndsAt(null);
+        else if (autoRef.current.phase === "recording") void autoRef.current.stop();
+      }),
+    ];
     return () => {
-      sub.then((fn) => fn());
+      subs.forEach((s) => s.then((fn) => fn()));
     };
   }, []);
 
@@ -168,6 +221,9 @@ export function RecordingProvider({ children, onStarted, onNeedsAttention, onFin
     missingModel,
     start,
     stop,
+    join,
+    callEndsAt,
+    keep,
     toggle: () => toggleRef.current(),
     clearMissingModel: () => setMissingModel(null),
     setFolder: (folderId) => setMeeting((m) => (m ? { ...m, folderId } : m)),

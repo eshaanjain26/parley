@@ -1,10 +1,12 @@
 mod ask;
+mod autorec;
 mod calendar;
 mod capture;
 mod detect;
 mod dsp;
 mod enhance;
 mod export;
+mod links;
 mod llm;
 mod secrets;
 mod settings;
@@ -447,6 +449,51 @@ fn link_meeting_event(
         event.series_id.as_deref(),
         &event.attendees,
     )
+}
+
+/// Watches the current recording's call app so it can stop after the call ends.
+#[derive(Default)]
+pub(crate) struct CallWatchState(pub(crate) Mutex<autorec::CallWatch>);
+
+/// Opens a meeting's call link in its app or browser. Only links Parley itself recognises as
+/// call links are opened; calendar invites are untrusted text.
+#[tauri::command]
+fn join_call(url: String) -> Result<links::Provider, String> {
+    let link = links::classify(&url).ok_or("That isn't a Zoom, Teams, Meet or Webex link.")?;
+    std::process::Command::new("/usr/bin/open")
+        .arg(&link.url)
+        .status()
+        .map_err(|e| format!("couldn't open the call: {e}"))?;
+    Ok(link.provider)
+}
+
+/// After a recording starts for a call, follow the call's app (or any app running the provider)
+/// so the recording can stop when the call ends. Does nothing unless automatic recording is on.
+#[tauri::command]
+fn follow_call(
+    app: tauri::AppHandle,
+    watch: State<'_, CallWatchState>,
+    bundle_id: Option<String>,
+    provider: Option<links::Provider>,
+) -> Result<(), String> {
+    let prefs = settings::load(&settings_path(&app)?).map_err(|e| e.to_string())?;
+    if !prefs.auto_record {
+        return Ok(());
+    }
+    let mut w = watch.0.lock().map_err(|e| e.to_string())?;
+    match (bundle_id, provider) {
+        (Some(id), _) => w.follow_app(&id),
+        (None, Some(p)) => w.follow_provider(p),
+        (None, None) => w.clear(),
+    }
+    Ok(())
+}
+
+/// "Keep recording": the call ended but the user wants to carry on.
+#[tauri::command]
+fn keep_recording(watch: State<'_, CallWatchState>) -> Result<(), String> {
+    watch.0.lock().map_err(|e| e.to_string())?.clear();
+    Ok(())
 }
 
 #[tauri::command]
@@ -895,7 +942,11 @@ async fn stop_recording(
     app: tauri::AppHandle,
     state: State<'_, RecorderState>,
     store: State<'_, StoreState>,
+    watch: State<'_, CallWatchState>,
 ) -> Result<store::Meeting, String> {
+    if let Ok(mut w) = watch.0.lock() {
+        w.clear();
+    }
     let store = store.get()?;
     let active = state
         .0
@@ -963,6 +1014,7 @@ pub fn run() {
                 eprintln!("{e}");
             }
             shell::start_meeting_watcher(app.handle().clone());
+            shell::start_reminders(app.handle().clone());
             if prefs.auto_update {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
@@ -985,6 +1037,7 @@ pub fn run() {
             }
         })
         .manage(RecorderState::default())
+        .manage(CallWatchState::default())
         .manage(ModelCache::default())
         .manage(DownloadState::default())
         .manage(EnhanceState::default())
@@ -1008,6 +1061,9 @@ pub fn run() {
             cancel_enhance,
             list_meetings,
             list_folders,
+            join_call,
+            follow_call,
+            keep_recording,
             calendar_status,
             connect_calendar,
             list_calendars,

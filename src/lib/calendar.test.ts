@@ -13,6 +13,7 @@ const ev = (startMin: number, endMin: number, allDay = false): CalendarEvent => 
   attendees: [],
   url: "",
   location: "",
+  callLink: null,
 });
 
 describe("calendar helpers", () => {

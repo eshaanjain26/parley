@@ -46,6 +46,10 @@ pub struct Settings {
     pub calendar_enabled: bool,
     /// Calendars to read; empty means all of them.
     pub calendar_ids: Vec<String>,
+    /// A notification shortly before calendar events that have a call link.
+    pub event_reminders: bool,
+    /// Start recording when a calendar call's app joins, and stop after it leaves.
+    pub auto_record: bool,
 }
 
 impl Default for Settings {
@@ -67,6 +71,8 @@ impl Default for Settings {
             auto_update: true,
             calendar_enabled: false,
             calendar_ids: Vec::new(),
+            event_reminders: true,
+            auto_record: false,
         }
     }
 }
@@ -144,5 +150,7 @@ mod tests {
         assert_eq!(v["autoUpdate"], true);
         assert_eq!(v["calendarEnabled"], false);
         assert_eq!(v["calendarIds"], serde_json::json!([]));
+        assert_eq!(v["eventReminders"], true);
+        assert_eq!(v["autoRecord"], false);
     }
 }

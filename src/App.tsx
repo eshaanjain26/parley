@@ -1,4 +1,4 @@
-import { Folder as FolderIcon, House, Lock, MessageCircleQuestion, Plus, Settings as SettingsIcon, Square } from "lucide-react";
+import { Folder as FolderIcon, House, Lock, MessageCircleQuestion, PhoneOff, Plus, Settings as SettingsIcon, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import { AskView } from "./AskView";
@@ -192,6 +192,7 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
       </aside>
 
       <main className="content">
+        {rec.callEndsAt !== null && recording && <CallEndingToast endsAt={rec.callEndsAt} onKeep={rec.keep} onStop={() => void rec.stop()} />}
         {route.name === "folder" && openFolder && (
           <Home
             key={openFolder.id}
@@ -245,6 +246,26 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
         )}
         {route.name === "settings" && <SettingsView />}
       </main>
+    </div>
+  );
+}
+
+/** The call app left the call; the recording stops when the countdown ends unless the user keeps it. */
+function CallEndingToast({ endsAt, onKeep, onStop }: { endsAt: number; onKeep: () => void; onStop: () => void }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const seconds = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  return (
+    <div className="toast" role="status">
+      <PhoneOff size={18} aria-hidden />
+      <p>
+        <strong>The call ended.</strong> Recording stops in <span className="tabular">{seconds}</span> s.
+      </p>
+      <button className="secondary" onClick={onKeep}>Keep recording</button>
+      <button className="primary" onClick={onStop}>Stop now</button>
     </div>
   );
 }

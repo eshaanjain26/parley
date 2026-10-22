@@ -1,8 +1,12 @@
-//! macOS integration outside the main window: the menu-bar item, the global hotkey, and the
-//! "meeting detected" watcher.
+//! macOS integration outside the main window: the menu-bar item, the global hotkey, the
+//! "meeting detected" watcher (which also starts and stops automatic recordings) and calendar
+//! reminders.
 
+use crate::autorec::{self, CallChange};
+use crate::calendar::{self, CalendarEvent};
 use crate::detect::{self, Detector};
-use crate::{RecorderState, settings, settings_path};
+use crate::{CallWatchState, RecorderState, settings, settings_path};
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -116,6 +120,51 @@ struct MeetingDetected {
     app_name: String,
 }
 
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AutoRecord {
+    event: CalendarEvent,
+    bundle_id: String,
+    app_name: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CallChangePayload {
+    /// "ended", "resumed" or "stop".
+    kind: &'static str,
+    seconds: u64,
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn load_settings(app: &AppHandle) -> settings::Settings {
+    settings_path(app)
+        .ok()
+        .and_then(|p| settings::load(&p).ok())
+        .unwrap_or_default()
+}
+
+/// The calendar event happening now, if the calendar is on.
+fn event_now(prefs: &settings::Settings) -> Option<CalendarEvent> {
+    if !prefs.calendar_enabled {
+        return None;
+    }
+    let now = now_ms();
+    let events = calendar::events(
+        now - 12 * 60 * 60 * 1000,
+        now + calendar::EARLY_START_MS,
+        &prefs.calendar_ids,
+    )
+    .ok()?;
+    calendar::current_event(&events, now).cloned()
+}
+
 /// Runs the mic watcher sidecar for the life of the app and turns its reports into
 /// notifications (when enabled in Settings) and a `meeting-detected` event for the UI.
 pub fn start_meeting_watcher(app: AppHandle) {
@@ -148,13 +197,35 @@ pub fn start_meeting_watcher(app: AppHandle) {
                 .lock()
                 .map(|r| r.is_some())
                 .unwrap_or(false);
+            follow_call(&app, &apps, recording);
             for hit in detector.update(&apps, Instant::now(), recording) {
-                let enabled = settings_path(&app)
-                    .ok()
-                    .and_then(|p| settings::load(&p).ok())
-                    .map(|s| s.detect_meetings)
-                    .unwrap_or(true);
-                if !enabled {
+                let prefs = load_settings(&app);
+                if prefs.auto_record {
+                    let current = event_now(&prefs);
+                    if let Some(event) =
+                        autorec::event_to_auto_record(&hit.bundle_id, current.as_ref())
+                    {
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title(format!("Recording \u{201c}{}\u{201d}", event.title))
+                            .body(format!(
+                                "{} joined the call, so Parley started notes. Let everyone know you're recording.",
+                                hit.app_name
+                            ))
+                            .show();
+                        let _ = app.emit(
+                            "auto-record",
+                            AutoRecord {
+                                event: event.clone(),
+                                bundle_id: hit.bundle_id.clone(),
+                                app_name: hit.app_name.clone(),
+                            },
+                        );
+                        continue;
+                    }
+                }
+                if !prefs.detect_meetings {
                     continue;
                 }
                 let _ = app.emit(
@@ -173,6 +244,64 @@ pub fn start_meeting_watcher(app: AppHandle) {
                     ))
                     .show();
             }
+        }
+    });
+}
+
+/// Tells the UI when the recording's call app leaves the call, comes back, or has been gone
+/// long enough to stop.
+fn follow_call(app: &AppHandle, apps: &[String], recording: bool) {
+    let state = app.state::<CallWatchState>();
+    let Ok(mut watch) = state.0.lock() else {
+        return;
+    };
+    if !recording || !watch.is_active() {
+        return;
+    }
+    let payload = match watch.update(apps, Instant::now()) {
+        Some(CallChange::Ended { seconds }) => CallChangePayload {
+            kind: "ended",
+            seconds,
+        },
+        Some(CallChange::Resumed) => CallChangePayload {
+            kind: "resumed",
+            seconds: 0,
+        },
+        Some(CallChange::Stop) => CallChangePayload {
+            kind: "stop",
+            seconds: 0,
+        },
+        None => return,
+    };
+    let _ = app.emit("call-change", payload);
+}
+
+/// Checks the calendar every 30 seconds and sends a notification shortly before each call.
+pub fn start_reminders(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut reminded = HashSet::new();
+        loop {
+            let prefs = load_settings(&app);
+            if prefs.calendar_enabled && prefs.event_reminders {
+                let now = now_ms();
+                if let Ok(events) = calendar::events(now, now + 3 * 60 * 1000, &prefs.calendar_ids)
+                {
+                    for e in autorec::due_reminders(&events, now, &mut reminded) {
+                        let provider = e
+                            .call_link
+                            .as_ref()
+                            .map(|l| l.provider.label())
+                            .unwrap_or("The call");
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title(format!("\u{201c}{}\u{201d} starts in a minute", e.title))
+                            .body(format!("{provider} call. Join from Parley's Home to record it, or press {HOTKEY_LABEL} once you're in."))
+                            .show();
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_secs(30));
         }
     });
 }

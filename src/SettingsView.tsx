@@ -356,6 +356,23 @@ function CalendarSection({
           <span className="hint">Upcoming meetings on Home; recordings take the event's title and attendees.</span>
         </span>
       </label>
+      <label className="check">
+        <input type="checkbox" checked={settings.eventReminders} onChange={(e) => set("eventReminders", e.target.checked)} />
+        <span>
+          Remind me a minute before calls
+          <span className="hint">For events with a Zoom, Teams, Meet or Webex link.</span>
+        </span>
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={settings.autoRecord} onChange={(e) => set("autoRecord", e.target.checked)} />
+        <span>
+          Record calls automatically
+          <span className="hint">
+            When the app for a scheduled call joins, Parley starts recording, and stops 30 seconds after the call ends. Let the people on
+            the call know you're recording.
+          </span>
+        </span>
+      </label>
       {calendars === null && !notice ? (
         <p className="status">Loading calendars…</p>
       ) : (
