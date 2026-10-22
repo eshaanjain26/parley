@@ -40,15 +40,26 @@ jobs:
       - name: Tag matches app version
         run: npm run set-version -- "${GITHUB_REF_NAME#v}" --check
 
-      # Without a Developer ID certificate in secrets the app is ad-hoc signed: it runs after
-      # right-click > Open, but macOS asks for microphone and system-audio access again after
-      # each update. Adding the APPLE_* secrets switches on Developer ID signing and notarization.
+      # Without a Developer ID certificate in secrets the app is ad-hoc signed: users open it
+      # through Privacy & Security > Open Anyway, and macOS asks for microphone and system-audio
+      # access again after each update. Adding the APPLE_* secrets switches on Developer ID
+      # signing and notarization. Tauri treats any APPLE_CERTIFICATE variable as a certificate
+      # to import, even an empty one from a missing secret, so the Apple variables reach the
+      # build only when the certificate is set.
       - name: Choose signing
         id: signing
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ -n "$APPLE_CERTIFICATE" ]; then
+            for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              echo "$v=${!v}" >> "$GITHUB_ENV"
+            done
             echo "config=" >> "$GITHUB_OUTPUT"
             echo "Signing with Developer ID and notarizing."
           else
@@ -61,12 +72,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Parley ${{ github.ref_name }}
