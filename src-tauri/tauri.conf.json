@@ -52,7 +52,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_PARLEY_UPDATER_PUBKEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ5MzE5NzU0MDQ1QTJDNTAKUldSUUxGb0VWSmN4MlVLOTV3ZG1RQmdNNGpsS0RRRC9HV2s4SnUzWEp0cTBhM3ZFU2dDL24rMFEK",
       "endpoints": [
         "https://github.com/eshaanjain26/parley/releases/latest/download/latest.json"
       ],
