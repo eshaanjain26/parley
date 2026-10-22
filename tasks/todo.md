@@ -34,8 +34,22 @@ Rust core
 - [x] **M3 Notes**: TipTap editor beside the live transcript; meeting record saved to encrypted SQLite.
 - [x] **M4 AI notes**: "Enhance" merges your notes + transcript through a template; streaming output; 4 built-in templates (general, 1:1, sales call, standup) plus custom. Ollama default, BYO cloud keys.
 - [x] **M5 Library**: meeting list, full-text search, ask-across-meetings chat, Markdown/PDF export, copy to clipboard.
-- [ ] **M6 Detection + polish**: meeting detection notification, menu-bar item, global hotkey, onboarding, branding (icon, colors, name).
+- [x] **M6 Detection + polish**: meeting detection notification, menu-bar item, global hotkey, onboarding, branding (icon, colors, name).
 - [ ] **M7 Release**: Developer ID signing, notarization, DMG, signed auto-updater on GitHub Releases, landing README, privacy policy.
+
+## M7 plan (2026-10-21)
+
+Decisions: no Apple Developer membership yet, so signing and notarization switch on from GitHub secrets when they exist and releases ship ad-hoc signed until then. The main repo goes public (MIT) and hosts releases plus the update feed.
+
+- [ ] **Updater in the app.** tauri-plugin-updater + tauri-plugin-process. Feed: `releases/latest/download/latest.json` on this repo, verified with a minisign public key in `tauri.conf.json`. Quiet check on launch (Settings toggle, default on) and a "Check for updates" button; a banner offers "Restart to update" once downloaded. Debug builds read `PARLEY_UPDATE_ENDPOINT` so the flow can be tested against a local feed.
+- [ ] **Updater signing key.** You generate it (`npx tauri signer generate`) so you own the password; I read only the `.pub` file. You add the private key and password as GitHub secrets with `gh secret set` (I give you the commands; I don't handle the key).
+- [ ] **Release workflow.** On a `v*` tag: matrix build on macos-14 for `aarch64-apple-darwin` and `x86_64-apple-darwin` (build.rs already compiles sidecars per arch), tauri-action creates a draft release with both DMGs, the updater `.app.tar.gz` + `.sig`, and a merged `latest.json`. Fails if the tag doesn't match the app version.
+- [ ] **Signing switch.** With `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` set: Developer ID signing, hardened runtime, notarization and stapling. Without them: ad-hoc signing (`-`). Documented trade-off: ad-hoc builds lose mic/system-audio permission on every update.
+- [ ] **Version script.** `npm run version -- 0.2.0` updates package.json, Cargo.toml and tauri.conf.json together; unit-tested.
+- [ ] **Docs.** Landing README (what it does, screenshot, install incl. right-click > Open for unsigned builds, privacy summary, build from source), `PRIVACY.md` (what stays on the Mac, what goes to each optional provider, no telemetry), `SECURITY.md`, `CHANGELOG.md`.
+- [ ] **Pre-public audit.** Scan full git history for secrets and personal data, confirm no third-party product assets, check LICENSE and third-party notices (whisper.cpp MIT, model download licenses).
+- [ ] **Verify.** Local release DMG build; updater end to end on this Mac: install 0.1.0, serve a signed 0.1.1 from a local feed, update and relaunch. CI green on the PR.
+- [ ] **Go public + first release.** Only after you confirm: flip the repo to public, tag `v0.1.0`, publish the draft release.
 
 ## Deferred past v1
 
