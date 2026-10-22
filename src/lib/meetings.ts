@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Attendee } from "./calendar";
 import type { TranscriptLine } from "./transcript";
 
 // Mirrors Meeting in src-tauri/src/store.rs.
@@ -14,6 +15,8 @@ export interface Meeting {
   enhancedTemplateId: string;
   enhancedAtMs: number | null;
   folderId: string | null;
+  eventId: string | null;
+  attendees: Attendee[];
   transcript: TranscriptLine[];
 }
 

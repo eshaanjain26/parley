@@ -1,6 +1,7 @@
 //! Meetings, notes and transcripts in an encrypted SQLite database (SQLCipher, AES-256 via
 //! Apple CommonCrypto). The 256-bit key lives in the macOS Keychain, never on disk.
 
+use crate::calendar::Attendee;
 use crate::enhance::Template;
 use crate::transcribe::{Speaker, TranscriptLine};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -31,6 +32,9 @@ pub struct Meeting {
     pub enhanced_at_ms: Option<i64>,
     /// The folder the meeting is filed in, if any.
     pub folder_id: Option<String>,
+    /// The calendar event this recording belongs to, if one was matched.
+    pub event_id: Option<String>,
+    pub attendees: Vec<Attendee>,
     pub transcript: Vec<TranscriptLine>,
 }
 
@@ -82,6 +86,11 @@ const MIGRATIONS: &[&str] = &[
     );
     ALTER TABLE meetings ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL;
     CREATE INDEX meetings_by_folder ON meetings(folder_id, started_at_ms DESC);",
+    // v5: the calendar event a recording belongs to, and who was invited
+    "ALTER TABLE meetings ADD COLUMN event_id TEXT;
+    ALTER TABLE meetings ADD COLUMN series_id TEXT;
+    ALTER TABLE meetings ADD COLUMN attendees_json TEXT NOT NULL DEFAULT '[]';
+    CREATE INDEX meetings_by_series ON meetings(series_id, started_at_ms DESC);",
 ];
 
 /// Longest folder name, in characters.
@@ -303,7 +312,8 @@ impl Store {
         let meeting = conn
             .query_row(
                 "SELECT id, title, started_at_ms, duration_secs, notes_json, notes_text, updated_at_ms,
-                        enhanced_md, enhanced_template_id, enhanced_at_ms, folder_id
+                        enhanced_md, enhanced_template_id, enhanced_at_ms, folder_id,
+                        event_id, attendees_json
                  FROM meetings WHERE id = ?1",
                 params![id],
                 |r| {
@@ -319,6 +329,9 @@ impl Store {
                         enhanced_template_id: r.get(8)?,
                         enhanced_at_ms: r.get(9)?,
                         folder_id: r.get(10)?,
+                        event_id: r.get(11)?,
+                        // Written only by link_event; an unreadable list just shows no one.
+                        attendees: serde_json::from_str(&r.get::<_, String>(12)?).unwrap_or_default(),
                         transcript: Vec::new(),
                     })
                 },
@@ -557,6 +570,59 @@ impl Store {
             return Err(format!("meeting {meeting_id} not found"));
         }
         Ok(())
+    }
+
+    /// Ties a meeting to its calendar event. An unfiled meeting from a repeating event goes into
+    /// the folder its most recent filed occurrence is in; returns that folder when it does.
+    pub fn link_event(
+        &self,
+        meeting_id: &str,
+        event_id: &str,
+        series_id: Option<&str>,
+        attendees: &[Attendee],
+    ) -> Result<Option<String>, String> {
+        let attendees_json = serde_json::to_string(attendees).map_err(|e| e.to_string())?;
+        let conn = self.0.lock().map_err(|e| e.to_string())?;
+        let changed = conn
+            .execute(
+                "UPDATE meetings SET event_id = ?2, series_id = ?3, attendees_json = ?4 WHERE id = ?1",
+                params![meeting_id, event_id, series_id, attendees_json],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 0 {
+            return Err(format!("meeting {meeting_id} not found"));
+        }
+        let Some(series_id) = series_id else {
+            return Ok(None);
+        };
+        let filed: Option<String> = conn
+            .query_row(
+                "SELECT folder_id FROM meetings WHERE id = ?1",
+                params![meeting_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if filed.is_some() {
+            return Ok(None);
+        }
+        let folder: Option<String> = conn
+            .query_row(
+                "SELECT folder_id FROM meetings
+                 WHERE series_id = ?1 AND id != ?2 AND folder_id IS NOT NULL
+                 ORDER BY started_at_ms DESC LIMIT 1",
+                params![series_id, meeting_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if let Some(folder) = &folder {
+            conn.execute(
+                "UPDATE meetings SET folder_id = ?2 WHERE id = ?1",
+                params![meeting_id, folder],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(folder)
     }
 
     pub fn custom_templates(&self) -> Result<Vec<Template>, String> {
@@ -1058,6 +1124,72 @@ mod tests {
         store.create_folder("f1", "Vendors", 2).unwrap();
         store.set_meeting_folder("old", Some("f1")).unwrap();
         assert_eq!(store.list_folders().unwrap()[0].meeting_count, 1);
+    }
+
+    #[test]
+    fn linking_an_event_stores_attendees_and_files_repeat_meetings() {
+        let (_dir, store) = seeded();
+        store.create_folder("f1", "1:1s", 1).unwrap();
+        let priya = Attendee {
+            name: "Priya Shah".into(),
+            email: "priya@example.com".into(),
+        };
+        // Last week's occurrence, filed by hand.
+        assert_eq!(
+            store
+                .link_event("a", "ev:1", Some("weekly"), std::slice::from_ref(&priya))
+                .unwrap(),
+            None
+        );
+        store.set_meeting_folder("a", Some("f1")).unwrap();
+        // This week's occurrence follows it into the folder.
+        assert_eq!(
+            store
+                .link_event("b", "ev:2", Some("weekly"), std::slice::from_ref(&priya))
+                .unwrap()
+                .as_deref(),
+            Some("f1")
+        );
+        let b = store.get_meeting("b").unwrap().unwrap();
+        assert_eq!(b.folder_id.as_deref(), Some("f1"));
+        assert_eq!(b.event_id.as_deref(), Some("ev:2"));
+        assert_eq!(b.attendees, vec![priya]);
+    }
+
+    #[test]
+    fn linking_never_moves_a_filed_meeting_or_one_off_events() {
+        let (_dir, store) = seeded();
+        store.create_folder("f1", "Old", 1).unwrap();
+        store.create_folder("f2", "Chosen", 2).unwrap();
+        store.link_event("a", "ev:1", Some("weekly"), &[]).unwrap();
+        store.set_meeting_folder("a", Some("f1")).unwrap();
+        // Already filed (e.g. recorded from a folder page): keeps its folder.
+        store.set_meeting_folder("b", Some("f2")).unwrap();
+        assert_eq!(
+            store.link_event("b", "ev:2", Some("weekly"), &[]).unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .get_meeting("b")
+                .unwrap()
+                .unwrap()
+                .folder_id
+                .as_deref(),
+            Some("f2")
+        );
+        // One-off events have no series to follow.
+        store.set_meeting_folder("b", None).unwrap();
+        assert_eq!(store.link_event("b", "ev:3", None, &[]).unwrap(), None);
+        assert!(store.link_event("missing", "ev:4", None, &[]).is_err());
+        assert!(
+            store
+                .get_meeting("b")
+                .unwrap()
+                .unwrap()
+                .attendees
+                .is_empty()
+        );
     }
 
     #[test]

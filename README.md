@@ -14,6 +14,8 @@ By default nothing leaves your Mac: whisper.cpp transcribes on device and Ollama
 
 - **Live transcript.** Your mic and the other side of the call are captured separately, labelled "You" and "Them", with macOS echo cancellation so speaker audio isn't transcribed twice.
 - **Notes beside the transcript.** Type rough notes while you listen. After the meeting, Enhance rewrites them with detail from the transcript using a template: general meeting, 1:1, sales call, standup, or your own.
+- **Folders.** Group meetings by client, team or project; search and Ask within a folder.
+- **Calendar.** Upcoming meetings from the calendars on your Mac (Google, Outlook and iCloud included). Recordings take the event's title and attendees, and a weekly meeting files itself into the folder you used last time.
 - **Library and search.** Every meeting is searchable by title, notes and transcript.
 - **Ask your meetings.** Ask a question across past meetings and get an answer with numbered sources you can open.
 - **Export.** Markdown file or PDF.

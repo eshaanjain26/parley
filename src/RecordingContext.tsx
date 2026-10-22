@@ -4,6 +4,15 @@ import { MODEL_MISSING, ModelStatus, TranscriptLine, applyLine, listModels, onTr
 import { missingKeyMessage } from "./lib/settings";
 import { defaultTitle } from "./lib/meetings";
 import { setMeetingFolder } from "./lib/folders";
+import { CalendarEvent, currentEvent, linkMeetingEvent } from "./lib/calendar";
+
+/** The calendar lookup must never hold up a recording for long. */
+const EVENT_LOOKUP_MS = 1500;
+
+function findCurrentEvent(): Promise<CalendarEvent | null> {
+  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), EVENT_LOOKUP_MS));
+  return Promise.race([currentEvent().catch(() => null), timeout]);
+}
 
 export type Phase = "idle" | "starting" | "recording" | "stopping";
 
@@ -19,8 +28,11 @@ export interface Recording {
   error: string | null;
   /** Set when the speech model must be downloaded before recording can start. */
   missingModel: ModelStatus | null;
-  /** Starts recording; with `folderId` the new meeting is filed there straight away. */
-  start: (folderId?: string | null) => Promise<void>;
+  /**
+   * Starts recording. With `folderId` the meeting is filed there. With `event` (or, without one,
+   * the calendar event happening now) the meeting takes the event's title and attendees.
+   */
+  start: (folderId?: string | null, event?: CalendarEvent | null) => Promise<void>;
   stop: () => Promise<void>;
   toggle: () => void;
   clearMissingModel: () => void;
@@ -70,14 +82,15 @@ export function RecordingProvider({ children, onStarted, onNeedsAttention, onFin
     };
   }, [phase]);
 
-  const start = async (folderId: string | null = null) => {
+  const start = async (folderId: string | null = null, event?: CalendarEvent | null) => {
     setError(null);
     setWarning(null);
     setLevels(SILENT);
     setLines([]);
     setMissingModel(null);
     setPhase("starting");
-    const title = defaultTitle(new Date());
+    const matched = event === undefined ? await findCurrentEvent() : event;
+    const title = matched?.title.trim() || defaultTitle(new Date());
     try {
       const started = await startRecording(title);
       const notes = [
@@ -86,12 +99,17 @@ export function RecordingProvider({ children, onStarted, onNeedsAttention, onFin
       ].filter(Boolean);
       setWarning(notes.length ? notes.join(" ") : null);
       let filed: string | null = null;
+      // Recording has started either way; a failed filing or link only leaves the meeting
+      // unfiled or unlinked.
       if (folderId) {
-        // Recording has started either way; a failed filing only leaves the meeting unfiled.
         filed = await setMeetingFolder(started.id, folderId).then(
           () => folderId,
           () => null,
         );
+      }
+      if (matched) {
+        const seriesFolder = await linkMeetingEvent(started.id, matched).catch(() => null);
+        filed = filed ?? seriesFolder;
       }
       setMeeting({ id: started.id, title, folderId: filed });
       setPhase("recording");

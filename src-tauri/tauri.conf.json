@@ -47,7 +47,8 @@
     "externalBin": [
       "binaries/parley-audiotap",
       "binaries/parley-mic",
-      "binaries/parley-micwatch"
+      "binaries/parley-micwatch",
+      "binaries/parley-calendar"
     ],
     "resources": {
       "../LICENSE": "LICENSE",

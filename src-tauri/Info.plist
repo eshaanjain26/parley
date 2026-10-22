@@ -6,5 +6,7 @@
   <string>Parley records your microphone during meetings to write a transcript. Audio stays on this Mac unless you choose a cloud transcription service.</string>
   <key>NSAudioCaptureUsageDescription</key>
   <string>Parley records the call audio from other apps (Zoom, Meet, Teams) so the transcript includes everyone, not just you.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>Parley shows your upcoming meetings and names each recording after its calendar event. Calendar data stays on this Mac.</string>
 </dict>
 </plist>

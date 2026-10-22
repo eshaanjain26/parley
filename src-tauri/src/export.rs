@@ -274,6 +274,8 @@ mod tests {
             enhanced_template_id: "general".into(),
             enhanced_at_ms: Some(1),
             folder_id: None,
+            event_id: None,
+            attendees: vec![],
             transcript: vec![TranscriptLine {
                 speaker: Speaker::Them,
                 segment_id: 0,
@@ -312,6 +314,8 @@ mod tests {
             enhanced_template_id: String::new(),
             enhanced_at_ms: None,
             folder_id: None,
+            event_id: None,
+            attendees: vec![],
             transcript: vec![],
         };
         let md = meeting_markdown(&m, 0);

@@ -194,6 +194,8 @@ mod tests {
             enhanced_template_id: String::new(),
             enhanced_at_ms: None,
             folder_id: None,
+            event_id: None,
+            attendees: vec![],
             transcript: lines,
         }
     }

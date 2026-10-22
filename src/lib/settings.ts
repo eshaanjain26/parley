@@ -19,6 +19,9 @@ export interface Settings {
   hotkeyEnabled: boolean;
   onboarded: boolean;
   autoUpdate: boolean;
+  calendarEnabled: boolean;
+  /** Calendars to read; empty means all of them. */
+  calendarIds: string[];
 }
 
 export interface AppInfo {

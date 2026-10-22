@@ -1,4 +1,5 @@
 mod ask;
+mod calendar;
 mod capture;
 mod detect;
 mod dsp;
@@ -372,6 +373,80 @@ fn search_meetings(
     folder_id: Option<String>,
 ) -> Result<Vec<store::MeetingSummary>, String> {
     store.get()?.search(&query, false, 50, folder_id.as_deref())
+}
+
+#[tauri::command]
+async fn calendar_status() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(calendar::status)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Asks macOS for calendar access (a prompt the first time) and turns the calendar on if granted.
+#[tauri::command]
+async fn connect_calendar(app: tauri::AppHandle) -> Result<String, String> {
+    let status = tauri::async_runtime::spawn_blocking(calendar::request_access)
+        .await
+        .map_err(|e| e.to_string())??;
+    let path = settings_path(&app)?;
+    let mut prefs = settings::load(&path).map_err(|e| e.to_string())?;
+    prefs.calendar_enabled = status == "fullAccess";
+    settings::save(&path, &prefs).map_err(|e| e.to_string())?;
+    Ok(status)
+}
+
+#[tauri::command]
+async fn list_calendars() -> Result<Vec<calendar::CalendarInfo>, String> {
+    tauri::async_runtime::spawn_blocking(calendar::calendars)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Events from the chosen calendars, or none when the calendar is off.
+#[tauri::command]
+async fn upcoming_events(
+    app: tauri::AppHandle,
+    from_ms: i64,
+    to_ms: i64,
+) -> Result<Vec<calendar::CalendarEvent>, String> {
+    let prefs = settings::load(&settings_path(&app)?).map_err(|e| e.to_string())?;
+    if !prefs.calendar_enabled {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        calendar::events(from_ms, to_ms, &prefs.calendar_ids)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The event a recording starting now belongs to, if any.
+#[tauri::command]
+async fn current_event(app: tauri::AppHandle) -> Result<Option<calendar::CalendarEvent>, String> {
+    let now = now_ms()?;
+    let events = upcoming_events(
+        app,
+        now - 12 * 60 * 60 * 1000,
+        now + calendar::EARLY_START_MS,
+    )
+    .await?;
+    Ok(calendar::current_event(&events, now).cloned())
+}
+
+/// Records which event a meeting belongs to. Returns the folder it was filed in, if a repeating
+/// event's earlier occurrence decided one.
+#[tauri::command]
+fn link_meeting_event(
+    store: State<'_, StoreState>,
+    meeting_id: String,
+    event: calendar::CalendarEvent,
+) -> Result<Option<String>, String> {
+    store.get()?.link_event(
+        &meeting_id,
+        &event.id,
+        event.series_id.as_deref(),
+        &event.attendees,
+    )
 }
 
 #[tauri::command]
@@ -933,6 +1008,12 @@ pub fn run() {
             cancel_enhance,
             list_meetings,
             list_folders,
+            calendar_status,
+            connect_calendar,
+            list_calendars,
+            upcoming_events,
+            current_event,
+            link_meeting_event,
             create_folder,
             rename_folder,
             delete_folder,

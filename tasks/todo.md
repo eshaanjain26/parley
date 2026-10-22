@@ -94,7 +94,7 @@ Builds on the UI refresh (PR #17). Three PRs in this order, each verified in the
 - New Swift helper `parley-calendar` (same pattern as the audio helpers): requests full calendar access, lists events for a window as JSON, and reports calendar changes. Needs `NSCalendarsFullAccessUsageDescription` in Info.plist and the `com.apple.security.personal-information.calendars` entitlement for the hardened runtime.
 - Home "Coming up": today and tomorrow, with time, title, attendees count and a provider icon. Past days stay the meeting list.
 - Starting a recording during or just before an event uses the event's title and saves its attendees and event id (migration v5) on the meeting. Recordings from a recurring event go into the folder the last one was filed in, so a weekly 1:1 files itself.
-- Optional reminder notification 1 minute before an event with a call link.
+- Optional reminder notification 1 minute before an event with a call link. (Moved to PR C: it depends on call-link detection.)
 - Settings > Calendar: connect (permission), choose which calendars count, reminders on or off.
 - Tests: event JSON parsing, event-to-recording matching (overlap window), recurring-series folder memory.
 
@@ -238,3 +238,15 @@ Speaker names, on-device diarization, Windows, integrations (Slack, Notion, CRM)
 - UI: Folders section in the sidebar with counts and inline create; folder page (Home scoped to the folder: start card records into it, search, day groups, Ask bar "Ask about <folder>", rename and delete with confirmation); folder chip on meeting and recording pages to move, create-and-move or remove; folder names on Home rows; Ask shows its folder scope with a chip to widen it.
 - Tests: Rust 97 (5 new: scoping of list, search and counts; name rules; delete keeps meetings; v3 to v4 migration on an existing database; random ids). Vitest 42 (3 new for name checks).
 - Not checked in the app: the disk ran out during the app build (356 MB free).
+
+### Calendar (PR B, 2026-10-22, not yet checked in the app)
+
+- `parley-calendar` Swift helper (EventKit, read-only): `status`, `request`, `calendars`, `events FROM TO`. Occurrence ids are `calendarItemIdentifier:startMs`; repeating events carry a `seriesId`. Invite text is capped at 4000 characters and never serialized to the interface or stored.
+- Entitlement `com.apple.security.personal-information.calendars` (Tauri applies the app's entitlements to the helpers too, confirmed on the built bundle) and `NSCalendarsFullAccessUsageDescription`.
+- Rust `calendar` module: parsing, calendar filter (empty = all), `current_event` (timed events in progress or starting within 10 minutes; nearest start wins for back-to-back meetings). Commands: status, connect (prompts and turns the setting on), calendars, upcoming events, current event, link meeting to event.
+- Store v5: `event_id`, `series_id`, `attendees_json` on meetings. Linking a repeating event's new occurrence files it into the folder of its latest filed occurrence, unless the meeting is already filed.
+- Recording: any start (button, ⌥⇧⌘R, menu bar, Coming up) looks up the current event (1.5 s cap), uses its title, links attendees and applies series filing.
+- UI: Home "Coming up" (today and tomorrow, attendees, starts-in, Record button from 10 minutes before), a dismissible connect card, attendees chip on meetings, Settings > Calendar (connect, on/off, per-calendar checklist grouped by account).
+- Build: `[lib] crate-type` is now `rlib` only. The template's staticlib and cdylib are for mobile targets and cost ~330 MB per build on a nearly full disk.
+- Tests: Rust 104 (7 new), Vitest 45 (3 new).
+- Not checked in the app (disk full): the macOS prompt, real calendar data, the Coming up layout.
