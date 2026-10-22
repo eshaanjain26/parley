@@ -77,9 +77,39 @@ Decisions: no Apple Developer membership yet, so signing and notarization switch
 - [ ] Live check in the signed dev build: Home, search, meeting page, menus, recording, Ask bar, Settings, onboarding; light and dark screenshots; keyboard-only pass.
 - [ ] Pre-flight aesthetic checklist; PR with before/after screenshots.
 
+## Folders, calendar and meeting apps plan (2026-10-22)
+
+Builds on the UI refresh (PR #17). Three PRs in this order, each verified in the app before the next.
+
+### 1. Folders (PR A)
+- Store migration v4: `folders` (id, name, created) and a nullable `meetings.folder_id`. One folder per meeting, which matches how people file calls (by client, team or project); deleting a folder moves its meetings back to "No folder" and never deletes a meeting.
+- Sidebar "Folders" section with counts; create inline, rename, delete from a menu.
+- Folder page: the Home list filtered to the folder, with search inside it.
+- Meeting page: a folder chip in the meta row; its menu moves the meeting or creates a folder on the spot.
+- Ask scoped to a folder: `ask_meetings` takes an optional folder id, so the Ask bar on a folder page answers from that folder only ("Ask about Acme").
+- Tests: migration from v3, folder CRUD, delete keeps meetings, folder-scoped search and Ask retrieval.
+
+### 2. Calendar (PR B)
+- Source: macOS Calendar through EventKit. It already syncs the Google, Outlook/Exchange and iCloud calendars added to the Mac, so one local integration covers all of them with no cloud sign-in and nothing new leaving the Mac. Direct Google/Microsoft OAuth is out of scope: it needs a hosted OAuth client and Google's restricted-scope verification, and duplicates what macOS Calendar already provides.
+- New Swift helper `parley-calendar` (same pattern as the audio helpers): requests full calendar access, lists events for a window as JSON, and reports calendar changes. Needs `NSCalendarsFullAccessUsageDescription` in Info.plist and the `com.apple.security.personal-information.calendars` entitlement for the hardened runtime.
+- Home "Coming up": today and tomorrow, with time, title, attendees count and a provider icon. Past days stay the meeting list.
+- Starting a recording during or just before an event uses the event's title and saves its attendees and event id (migration v5) on the meeting. Recordings from a recurring event go into the folder the last one was filed in, so a weekly 1:1 files itself.
+- Optional reminder notification 1 minute before an event with a call link.
+- Settings > Calendar: connect (permission), choose which calendars count, reminders on or off.
+- Tests: event JSON parsing, event-to-recording matching (overlap window), recurring-series folder memory.
+
+### 3. Zoom, Teams, Google Meet and Webex (PR C)
+- Local integration (recommended): read the call link from each event's URL, location and notes (zoom.us/j, teams.microsoft.com/l/meetup-join, meet.google.com, webex.com), and show a **Join** button that opens the call in its app or browser and starts Parley's recording in one click.
+- Auto-start option: when a calendar event with a call link is in progress and its app takes the microphone (the existing detection), start recording automatically instead of only prompting. Auto-stop when the call app releases the microphone for 30 s, with a "Keep recording" escape. Off by default.
+- Out of scope, and why: the vendors' cloud APIs (Zoom, Microsoft Graph, Google Meet) need hosted OAuth apps, admin consent in most companies and a server, and their recording features rely on a bot joining the call. That contradicts Parley's design (local, no bot). Reconsider only for pulling the vendors' own cloud transcripts later.
+- Tests: link extraction across real-world invite formats (Zoom personal and meeting IDs, Teams safelinks, Meet codes, Webex), auto-start and auto-stop state machine.
+
+### Docs
+- PRIVACY.md: calendar data is read on the Mac and stored only as title, time, attendees and event id on recorded meetings; nothing is uploaded.
+
 ## Deferred past v1
 
-Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integrations (Slack, Notion, CRM), sync, mobile.
+Speaker names, on-device diarization, Windows, integrations (Slack, Notion, CRM), sync, mobile.
 
 ## What you need to provide
 
