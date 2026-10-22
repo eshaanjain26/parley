@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { Meeting } from "./meetings";
 
 // Mirrors the structs returned by start_recording / stop_recording and the audio-levels event in src-tauri/src/lib.rs.
@@ -21,6 +21,10 @@ export interface AudioLevels {
 
 export const startRecording = (title: string) => invoke<RecordingStarted>("start_recording", { title });
 export const stopRecording = () => invoke<Meeting>("stop_recording");
+/** Sent by the menu-bar item, the global hotkey and the meeting banner. */
+export const onToggleRecording = (cb: () => void): Promise<UnlistenFn> => listen("toggle-recording", () => cb());
+export const requestToggleRecording = () => emit("toggle-recording");
+
 export const onAudioLevels = (cb: (l: AudioLevels) => void): Promise<UnlistenFn> =>
   listen<AudioLevels>("audio-levels", (e) => cb(e.payload));
 

@@ -1,11 +1,13 @@
 mod ask;
 mod capture;
+mod detect;
 mod dsp;
 mod enhance;
 mod export;
 mod llm;
 mod secrets;
 mod settings;
+mod shell;
 mod store;
 mod stt;
 mod transcribe;
@@ -43,6 +45,7 @@ fn models_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 struct AppInfo {
     name: String,
     version: String,
+    hotkey: &'static str,
 }
 
 #[tauri::command]
@@ -51,6 +54,7 @@ fn app_info(app: tauri::AppHandle) -> AppInfo {
     AppInfo {
         name: pkg.name.clone(),
         version: pkg.version.to_string(),
+        hotkey: shell::HOTKEY_LABEL,
     }
 }
 
@@ -62,6 +66,7 @@ fn get_settings(app: tauri::AppHandle) -> Result<Settings, String> {
 #[tauri::command]
 fn update_settings(app: tauri::AppHandle, settings: Settings) -> Result<Settings, String> {
     settings::save(&settings_path(&app)?, &settings).map_err(|e| e.to_string())?;
+    shell::apply_hotkey(&app, settings.hotkey_enabled)?;
     Ok(settings)
 }
 
@@ -748,11 +753,13 @@ async fn start_recording(
         meters_running,
         transcribers,
     });
+    shell::set_recording_indicator(&app, true);
     Ok(started)
 }
 
 #[tauri::command]
 async fn stop_recording(
+    app: tauri::AppHandle,
     state: State<'_, RecorderState>,
     store: State<'_, StoreState>,
 ) -> Result<store::Meeting, String> {
@@ -764,6 +771,7 @@ async fn stop_recording(
         .take()
         .ok_or("Not recording")?;
     active.meters_running.store(false, Ordering::Relaxed);
+    shell::set_recording_indicator(&app, false);
     // Stopping closes the audio taps, which lets each transcriber flush and finish.
     let done = active.recording.stop()?;
     let mut lines = active
@@ -793,6 +801,8 @@ async fn stop_recording(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(shell::global_shortcut_plugin())
         .manage(StoreState::default())
         .setup(|app| {
             // Reading the database key can wait on a macOS Keychain prompt. Off the main thread,
@@ -810,7 +820,23 @@ pub fn run() {
                     let _ = handle.emit("store-ready", ());
                 }
             });
+            shell::setup_tray(app.handle())?;
+            let prefs = settings_path(app.handle())
+                .ok()
+                .and_then(|p| settings::load(&p).ok())
+                .unwrap_or_default();
+            if let Err(e) = shell::apply_hotkey(app.handle(), prefs.hotkey_enabled) {
+                eprintln!("{e}");
+            }
+            shell::start_meeting_watcher(app.handle().clone());
             Ok(())
+        })
+        // Closing the window hides it: Parley keeps listening for meetings from the menu bar.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .manage(RecorderState::default())
         .manage(ModelCache::default())
@@ -843,6 +869,15 @@ pub fn run() {
             start_recording,
             stop_recording
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Parley");
+        .build(tauri::generate_context!())
+        .expect("error while building Parley")
+        .run(|app, event| {
+            // Clicking the Dock icon brings back a hidden window.
+            if let tauri::RunEvent::Reopen { .. } = event
+                && let Some(w) = app.get_webview_window("main")
+            {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        });
 }

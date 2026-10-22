@@ -15,11 +15,16 @@ export interface Settings {
   openaiModel: string;
   anthropicModel: string;
   keepAudio: boolean;
+  detectMeetings: boolean;
+  hotkeyEnabled: boolean;
+  onboarded: boolean;
 }
 
 export interface AppInfo {
   name: string;
   version: string;
+  /** The global start/stop shortcut, e.g. "⌥⇧⌘R". */
+  hotkey: string;
 }
 
 export const SPEECH_PROVIDERS: { value: SpeechProvider; label: string }[] = [

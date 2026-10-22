@@ -8,6 +8,7 @@ import {
   Settings,
   apiKeyStatus,
   deleteApiKey,
+  getAppInfo,
   getSettings,
   llmKeyAccount,
   setApiKey,
@@ -22,12 +23,14 @@ export function SettingsView() {
   const [status, setStatus] = useState<string>("");
   const [models, setModels] = useState<ModelStatus[]>([]);
   const [keys, setKeys] = useState<ApiKeyStatus>({});
+  const [hotkey, setHotkey] = useState("⌥⇧⌘R");
 
   const refreshKeys = () => apiKeyStatus().then(setKeys).catch(() => setKeys({}));
 
   useEffect(() => {
     listModels().then(setModels).catch(() => setModels([]));
     refreshKeys();
+    getAppInfo().then((i) => setHotkey(i.hotkey)).catch(() => {});
     getSettings()
       .then(setSettings)
       .catch((e) => setStatus(`Couldn't load settings: ${e}`));
@@ -81,6 +84,22 @@ export function SettingsView() {
         <span>
           Keep audio recordings
           <span className="hint">Off: audio is deleted once the transcript is saved. Transcripts and notes are always encrypted.</span>
+        </span>
+      </label>
+
+      <h2>Meetings</h2>
+      <label className="check">
+        <input type="checkbox" checked={settings.detectMeetings} onChange={(e) => set("detectMeetings", e.target.checked)} />
+        <span>
+          Notify me when a meeting starts
+          <span className="hint">When Zoom, Teams, Meet, Slack or FaceTime starts using your microphone. Parley only checks which apps use the mic; it doesn't listen.</span>
+        </span>
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={settings.hotkeyEnabled} onChange={(e) => set("hotkeyEnabled", e.target.checked)} />
+        <span>
+          Start and stop recording with {hotkey}
+          <span className="hint">Works from any app. Parley also lives in the menu bar.</span>
         </span>
       </label>
 

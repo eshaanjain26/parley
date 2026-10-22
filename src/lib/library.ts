@@ -42,6 +42,15 @@ export const printPage = () => invoke<void>("print_page");
 /** Fires once the encrypted database has been unlocked (it can wait on a Keychain prompt). */
 export const onStoreReady = (cb: () => void): Promise<UnlistenFn> => listen("store-ready", () => cb());
 
+export interface MeetingDetected {
+  bundleId: string;
+  appName: string;
+}
+
+/** A meeting app has held the microphone for a few seconds (and detection is on). */
+export const onMeetingDetected = (cb: (d: MeetingDetected) => void): Promise<UnlistenFn> =>
+  listen<MeetingDetected>("meeting-detected", (e) => cb(e.payload));
+
 export interface SnippetPart {
   text: string;
   hit: boolean;
