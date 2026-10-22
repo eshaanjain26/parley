@@ -8,6 +8,8 @@ Parley captures audio on your Mac, so it works with Zoom, Google Meet, Teams, Sl
 
 By default nothing leaves your Mac: whisper.cpp transcribes on device and Ollama writes the notes. If you want cloud quality, bring your own Deepgram, AssemblyAI, OpenAI-compatible or Anthropic key.
 
+<p align="center"><img src="assets/screenshot.jpg" width="800" alt="Parley showing a meeting's AI notes with summary, decisions and action items beside its transcript"></p>
+
 ## What it does
 
 - **Live transcript.** Your mic and the other side of the call are captured separately, labelled "You" and "Them", with macOS echo cancellation so speaker audio isn't transcribed twice.
