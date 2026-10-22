@@ -48,7 +48,11 @@
       "binaries/parley-audiotap",
       "binaries/parley-mic",
       "binaries/parley-micwatch"
-    ]
+    ],
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"
+    }
   },
   "plugins": {
     "updater": {
