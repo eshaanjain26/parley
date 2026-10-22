@@ -78,3 +78,27 @@ jobs:
           releaseBody: See CHANGELOG.md for what changed. Download the DMG for your Mac (aarch64 for Apple silicon, x64 for Intel).
           releaseDraft: true
           args: --target ${{ matrix.target }} --bundles app,dmg --config src-tauri/tauri.release.conf.json ${{ steps.signing.outputs.config }}
+
+  # tauri-action points the update feed at api.github.com asset URLs (the release is still a
+  # draft), which count against GitHub's unauthenticated API rate limit. Once both builds have
+  # uploaded, rewrite them to releases/download URLs, which go live when the draft is published.
+  feed:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Rewrite latest.json download URLs
+        run: |
+          mkdir feed
+          gh release download "$TAG" --pattern latest.json --dir feed
+          gh release view "$TAG" --json assets > feed/assets.json
+          node scripts/feed-urls.mjs feed/latest.json feed/assets.json "$GITHUB_REPOSITORY" "$TAG"
+          gh release upload "$TAG" feed/latest.json --clobber
