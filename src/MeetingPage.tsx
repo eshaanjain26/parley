@@ -1,4 +1,4 @@
-import { CalendarDays, ChevronLeft, Clock, Ellipsis, FileDown, FileText, MessageSquareText, PanelRight, Trash2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, Clock, Ellipsis, FileDown, FileText, MessageSquareText, PanelRight, Trash2, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AskBar } from "./AskBar";
@@ -6,6 +6,7 @@ import { FolderChip } from "./Folders";
 import { MeetingNotes } from "./MeetingNotes";
 import { Menu } from "./Menu";
 import { Transcript } from "./Recorder";
+import { attendeeSummary } from "./lib/calendar";
 import { dayLabel, timeOfDay } from "./lib/dates";
 import { renderMarkdown } from "./lib/enhance";
 import { deleteMeeting, exportMarkdown, formatMinutes, meetingMarkdown, printPage } from "./lib/library";
@@ -161,6 +162,12 @@ export function MeetingPage({ id, onBack, onDeleted, onAsk }: Props) {
                         {formatMinutes(meeting.durationSecs)}
                       </span>
                     ) : null}
+                    {meeting.attendees.length > 0 && (
+                      <span className="chip static" title={meeting.attendees.map((a) => a.name || a.email).join(", ")}>
+                        <Users size={14} aria-hidden />
+                        {attendeeSummary(meeting.attendees)}
+                      </span>
+                    )}
                     <span className="chip static">
                       <MessageSquareText size={14} aria-hidden />
                       {lineCount} transcript {lineCount === 1 ? "line" : "lines"}

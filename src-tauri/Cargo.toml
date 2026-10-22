@@ -14,7 +14,9 @@ edition = "2024"
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "parley_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop (macOS) only. The template's staticlib and cdylib exist for Tauri's iOS and Android
+# targets; building them added ~270 MB per build here.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

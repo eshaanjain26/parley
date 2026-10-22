@@ -4,6 +4,7 @@ fn main() {
     build_sidecar("parley-audiotap", "sidecar/audiotap/main.swift");
     build_sidecar("parley-mic", "sidecar/mic/main.swift");
     build_sidecar("parley-micwatch", "sidecar/micwatch/main.swift");
+    build_sidecar("parley-calendar", "sidecar/calendar/main.swift");
     tauri_build::build()
 }
 

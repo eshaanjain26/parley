@@ -1,6 +1,7 @@
 import { Ellipsis, FileText, Folder as FolderIcon, Mic, Pencil, Search, Sparkles, Square, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AskBar } from "./AskBar";
+import { ComingUp } from "./ComingUp";
 import { FolderNameForm, useFolders } from "./Folders";
 import { Menu } from "./Menu";
 import { useRecording } from "./RecordingContext";
@@ -15,6 +16,7 @@ interface Props {
   onDismissDetected: () => void;
   onOpenMeeting: (id: string) => void;
   onOpenRecording: () => void;
+  onOpenSettings: () => void;
   onAsk: (question: string) => void;
   /** Changes when ⌘K asks for the search box. */
   focusSearch: number;
@@ -23,7 +25,18 @@ interface Props {
   onFolderDeleted?: () => void;
 }
 
-export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpenRecording, onAsk, focusSearch, folder, onFolderDeleted }: Props) {
+export function Home({
+  hotkey,
+  detected,
+  onDismissDetected,
+  onOpenMeeting,
+  onOpenRecording,
+  onOpenSettings,
+  onAsk,
+  focusSearch,
+  folder,
+  onFolderDeleted,
+}: Props) {
   const rec = useRecording();
   const folders = useFolders();
   const folderId = folder?.id ?? null;
@@ -192,6 +205,8 @@ export function Home({ hotkey, detected, onDismissDetected, onOpenMeeting, onOpe
             </button>
           </section>
         )}
+
+        {!folder && <ComingUp onOpenSettings={onOpenSettings} />}
 
         <div className="search-field">
           <Search size={16} aria-hidden />

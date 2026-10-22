@@ -1,4 +1,4 @@
-import { AudioLines, CalendarClock, KeyRound, RefreshCw, Sparkles } from "lucide-react";
+import { AudioLines, CalendarClock, CalendarDays, KeyRound, RefreshCw, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   ApiKeyStatus,
@@ -18,6 +18,7 @@ import {
 } from "./lib/settings";
 import { ModelStatus, formatBytes, listModels } from "./lib/transcript";
 import { TemplatesSection } from "./TemplatesSection";
+import { CalendarInfo, connectCalendar, listCalendars } from "./lib/calendar";
 import { createAutosaver } from "./lib/meetings";
 import { checkForUpdate } from "./lib/update";
 
@@ -160,6 +161,15 @@ export function SettingsView() {
           </div>
 
           <div className="settings-card">
+            <h2 className="section-title"><CalendarDays size={17} aria-hidden />Calendar</h2>
+            <CalendarSection
+              settings={settings}
+              set={set}
+              onConnected={() => getSettings().then(setSettings).catch(() => {})}
+            />
+          </div>
+
+          <div className="settings-card">
             <h2 className="section-title"><RefreshCw size={17} aria-hidden />Updates</h2>
             <label className="check">
               <input type="checkbox" checked={settings.autoUpdate} onChange={(e) => set("autoUpdate", e.target.checked)} />
@@ -276,5 +286,96 @@ function KeyField({ account, saved, onChange, sends }: { account: KeyAccount; sa
       </div>
       <p className="hint">Using {label} sends {sends} to {label}. The key is stored in the macOS Keychain.</p>
     </div>
+  );
+}
+
+/** Connect the Mac's calendars and pick which ones count. Empty `calendarIds` means all. */
+function CalendarSection({
+  settings,
+  set,
+  onConnected,
+}: {
+  settings: Settings;
+  set: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+  onConnected: () => void;
+}) {
+  const [calendars, setCalendars] = useState<CalendarInfo[] | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (settings.calendarEnabled) listCalendars().then(setCalendars).catch((e) => setNotice(String(e)));
+  }, [settings.calendarEnabled]);
+
+  const connect = async () => {
+    setNotice(null);
+    try {
+      const status = await connectCalendar();
+      if (status === "fullAccess") onConnected();
+      else if (status === "denied" || status === "restricted")
+        setNotice("Calendar access is off. Turn on Parley in System Settings > Privacy & Security > Calendars, then connect again.");
+      else setNotice("Parley needs full calendar access to read your events.");
+    } catch (e) {
+      setNotice(String(e));
+    }
+  };
+
+  if (!settings.calendarEnabled) {
+    return (
+      <>
+        <p className="card-text">
+          Show upcoming meetings on Home and name each recording after its calendar event, with the people invited. Parley reads the
+          calendars on this Mac, so Google, Outlook and iCloud accounts added in System Settings are included. Nothing is uploaded.
+        </p>
+        <div className="actions">
+          <button className="primary" onClick={connect}>
+            <CalendarDays size={15} aria-hidden />
+            Connect calendar
+          </button>
+        </div>
+        {notice && <p className="error" role="alert">{notice}</p>}
+      </>
+    );
+  }
+
+  const all = calendars ?? [];
+  const chosen = (id: string) => settings.calendarIds.length === 0 || settings.calendarIds.includes(id);
+  const toggle = (id: string, on: boolean) => {
+    const current = settings.calendarIds.length === 0 ? all.map((c) => c.id) : settings.calendarIds;
+    const next = on ? [...new Set([...current, id])] : current.filter((c) => c !== id);
+    // Every calendar chosen is stored as "all", so calendars added later are included too.
+    set("calendarIds", next.length === all.length && all.every((c) => next.includes(c.id)) ? [] : next);
+  };
+  const sources = [...new Set(all.map((c) => c.source))];
+
+  return (
+    <>
+      <label className="check">
+        <input type="checkbox" checked={settings.calendarEnabled} onChange={(e) => set("calendarEnabled", e.target.checked)} />
+        <span>
+          Use my calendar
+          <span className="hint">Upcoming meetings on Home; recordings take the event's title and attendees.</span>
+        </span>
+      </label>
+      {calendars === null && !notice ? (
+        <p className="status">Loading calendars…</p>
+      ) : (
+        sources.map((source) => (
+          <fieldset key={source} className="calendar-group">
+            <legend>{source || "On this Mac"}</legend>
+            {all
+              .filter((c) => c.source === source)
+              .map((c) => (
+                <label key={c.id} className="check calendar-option">
+                  <input type="checkbox" checked={chosen(c.id)} onChange={(e) => toggle(c.id, e.target.checked)} />
+                  <span className="calendar-dot" style={{ background: c.color || "var(--muted)" }} aria-hidden />
+                  <span>{c.title}</span>
+                </label>
+              ))}
+          </fieldset>
+        ))
+      )}
+      {notice && <p className="error" role="alert">{notice}</p>}
+      <p className="hint">To stop Parley reading calendars entirely, turn it off in System Settings &gt; Privacy &amp; Security &gt; Calendars.</p>
+    </>
   );
 }

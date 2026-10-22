@@ -202,6 +202,7 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
             onDismissDetected={() => setDetected(null)}
             onOpenMeeting={(id) => setRoute({ name: "meeting", id })}
             onOpenRecording={() => setRoute({ name: "recording" })}
+            onOpenSettings={() => setRoute({ name: "settings" })}
             onAsk={(q) => ask(q, openFolder.id)}
             focusSearch={focusSearch}
           />
@@ -213,6 +214,7 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
             onDismissDetected={() => setDetected(null)}
             onOpenMeeting={(id) => setRoute({ name: "meeting", id })}
             onOpenRecording={() => setRoute({ name: "recording" })}
+            onOpenSettings={() => setRoute({ name: "settings" })}
             onAsk={ask}
             focusSearch={focusSearch}
           />

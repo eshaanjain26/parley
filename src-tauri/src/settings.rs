@@ -42,6 +42,10 @@ pub struct Settings {
     pub onboarded: bool,
     /// Check GitHub Releases for a new version shortly after launch.
     pub auto_update: bool,
+    /// Show upcoming events and match recordings to them (needs calendar access).
+    pub calendar_enabled: bool,
+    /// Calendars to read; empty means all of them.
+    pub calendar_ids: Vec<String>,
 }
 
 impl Default for Settings {
@@ -61,6 +65,8 @@ impl Default for Settings {
             hotkey_enabled: true,
             onboarded: false,
             auto_update: true,
+            calendar_enabled: false,
+            calendar_ids: Vec::new(),
         }
     }
 }
@@ -136,5 +142,7 @@ mod tests {
         assert_eq!(v["ollamaUrl"], "http://127.0.0.1:11434");
         assert_eq!(v["keepAudio"], false);
         assert_eq!(v["autoUpdate"], true);
+        assert_eq!(v["calendarEnabled"], false);
+        assert_eq!(v["calendarIds"], serde_json::json!([]));
     }
 }
