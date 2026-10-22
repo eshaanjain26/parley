@@ -874,9 +874,10 @@ pub fn run() {
         .run(|app, event| {
             // Clicking the Dock icon brings back a hidden window.
             if let tauri::RunEvent::Reopen { .. } = event
-                && let Some(w) = app.get_webview_window("main") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                }
+                && let Some(w) = app.get_webview_window("main")
+            {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
         });
 }
