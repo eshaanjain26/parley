@@ -1,3 +1,4 @@
+import { LayoutTemplate } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Template, deleteTemplate, listTemplates, newTemplate, saveTemplate } from "./lib/enhance";
 
@@ -37,7 +38,7 @@ export function TemplatesSection() {
 
   return (
     <div className="templates">
-      <h2>Note templates</h2>
+      <h2 className="section-title"><LayoutTemplate size={17} aria-hidden />AI note templates</h2>
       <ul className="template-list">
         {templates.map((t) => (
           <li key={t.id}>

@@ -1,213 +1,121 @@
+import { ChevronLeft, Mic, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import {
-  AudioLevels,
-  dbToPercent,
-  formatDuration,
-  onAudioLevels,
-  onToggleRecording,
-  startRecording,
-  stopRecording,
-} from "./lib/recording";
+import { MeetingNotes } from "./MeetingNotes";
+import { useRecording } from "./RecordingContext";
+import { dbToPercent, formatDuration } from "./lib/recording";
 import {
   DownloadProgress,
-  MODEL_MISSING,
   ModelStatus,
   TranscriptLine,
-  applyLine,
   cancelModelDownload,
   downloadModel,
   formatBytes,
   formatTimestamp,
-  listModels,
   onDownloadProgress,
-  onTranscriptError,
-  onTranscriptLine,
 } from "./lib/transcript";
-import { missingKeyMessage } from "./lib/settings";
-import { Meeting, defaultTitle } from "./lib/meetings";
-import { MeetingNotes } from "./MeetingNotes";
 
-type Phase = "idle" | "starting" | "recording" | "stopping";
+/** The live meeting: timer, meters, notes and the transcript as it is written. */
+export function RecordingPage({ onBack }: { onBack: () => void }) {
+  const rec = useRecording();
+  const recording = rec.phase === "recording" || rec.phase === "stopping";
 
-const SILENT: AudioLevels = { micDbfs: -100, systemDbfs: -100, seconds: 0, micEnded: false, systemEnded: false };
-
-/** The meeting on screen: the one being recorded, or the one that just finished. */
-interface OpenMeeting {
-  id: string;
-  title: string;
-  notesJson: string;
-}
-
-interface RecorderProps {
-  /** A new meeting row exists (recording started). */
-  onStarted?: (meetingId: string) => void;
-  /** Recording stopped and the meeting was saved; the parent opens it. */
-  onFinished?: (meetingId: string) => void;
-}
-
-export function Recorder({ onStarted, onFinished }: RecorderProps) {
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [levels, setLevels] = useState<AudioLevels>(SILENT);
-  const [lines, setLines] = useState<TranscriptLine[]>([]);
-  const [warning, setWarning] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [missingModel, setMissingModel] = useState<ModelStatus | null>(null);
-  const [open, setOpen] = useState<OpenMeeting | null>(null);
-  const [finished, setFinished] = useState<Meeting | null>(null);
-
-  useEffect(() => {
-    if (phase !== "recording" && phase !== "stopping") return;
-    const subs = [
-      onAudioLevels(setLevels),
-      onTranscriptLine((l) => setLines((prev) => applyLine(prev, l))),
-      onTranscriptError((m) => setWarning(`Transcription stopped: ${m}`)),
-    ];
-    return () => {
-      subs.forEach((s) => s.then((fn) => fn()));
-    };
-  }, [phase]);
-
-  const start = async () => {
-    setError(null);
-    setWarning(null);
-    setLevels(SILENT);
-    setLines([]);
-    setFinished(null);
-    setOpen(null);
-    setPhase("starting");
-    const title = defaultTitle(new Date());
-    try {
-      const started = await startRecording(title);
-      const notes = [
-        started.warning && `System audio is off: ${started.warning}. Recording your microphone only.`,
-        started.micWarning && `Echo cancellation is off (${started.micWarning}). Use headphones, or the call may also appear under "You".`,
-      ].filter(Boolean);
-      setWarning(notes.length ? notes.join(" ") : null);
-      setOpen({ id: started.id, title, notesJson: "" });
-      setPhase("recording");
-      onStarted?.(started.id);
-    } catch (e) {
-      const message = String(e);
-      const keyMessage = missingKeyMessage(message);
-      if (keyMessage) {
-        setError(`${keyMessage} Or switch transcription to "On this Mac".`);
-      } else if (message.startsWith(MODEL_MISSING)) {
-        const id = message.slice(MODEL_MISSING.length);
-        const model = (await listModels()).find((m) => m.id === id) ?? null;
-        setMissingModel(model);
-      } else {
-        setError(message);
-      }
-      setPhase("idle");
-    }
-  };
-
-  const stop = async () => {
-    setPhase("stopping");
-    try {
-      const meeting = await stopRecording();
-      // The finished meeting opens in the library's detail view, so this view resets. Keeping
-      // its editor mounted too would mean two autosaving editors on one meeting.
-      setOpen(null);
-      setFinished(null);
-      setLines([]);
-      onFinished?.(meeting.id);
-    } catch (e) {
-      setError(String(e));
-    }
-    setPhase("idle");
-  };
-
-  // The menu bar and the global hotkey ask the UI to toggle, so they share this exact flow.
-  const toggle = useRef<() => void>(() => {});
-  toggle.current = () => {
-    if (phase === "recording") void stop();
-    else if (phase === "idle") void start();
-  };
-  useEffect(() => {
-    const sub = onToggleRecording(() => toggle.current());
-    return () => {
-      sub.then((fn) => fn());
-    };
-  }, []);
-
-  if (!open) {
+  if (rec.missingModel) {
     return (
-      <section className="recorder-idle">
-        {missingModel ? (
-          <ModelDownload model={missingModel} onDone={() => setMissingModel(null)} />
-        ) : (
-          <div className="empty">
-            <h1>Start a new meeting</h1>
-            <p>
-              Parley records your mic and the call audio on this Mac, writes a live transcript, and keeps your notes next to it, all
-              encrypted on this Mac.
-            </p>
-            <button className="primary" onClick={start} disabled={phase === "starting"}>
-              {phase === "starting" ? "Starting…" : "Start recording"}
-            </button>
-            {error && <p className="error" role="alert">{error}</p>}
-          </div>
-        )}
-      </section>
+      <div className="page">
+        <div className="topbar">
+          <button className="ghost" onClick={onBack}>
+            <ChevronLeft size={16} aria-hidden />
+            Meetings
+          </button>
+        </div>
+        <div className="page-scroll">
+          <ModelDownload
+            model={rec.missingModel}
+            onDone={() => {
+              rec.clearMissingModel();
+              void rec.start();
+            }}
+          />
+        </div>
+      </div>
     );
   }
 
-  const recording = phase === "recording" || phase === "stopping";
-  return (
-    <section className="meeting">
-      <div className="rec-bar">
-        {recording ? (
-          <>
-            <div className="rec-header">
-              <span className="rec-dot" aria-hidden />
-              <span className="rec-time">{formatDuration(levels.seconds)}</span>
-            </div>
-            <div className="rec-meters">
-              <Meter label="You" db={levels.micDbfs} />
-              <Meter label="Others on the call" db={levels.systemDbfs} />
-            </div>
-            <button className="primary" onClick={stop} disabled={phase === "stopping"}>
-              {phase === "stopping" ? "Finishing transcript…" : "Stop"}
-            </button>
-          </>
-        ) : (
-          <>
-            <p className="rec-summary">
-              {finished
-                ? `Saved. ${formatDuration(finished.durationSecs ?? 0)} recorded, ${finished.transcript.length} transcript ${finished.transcript.length === 1 ? "line" : "lines"}.`
-                : "Recording stopped."}
-            </p>
-            <button className="primary" onClick={start}>
-              New recording
-            </button>
-          </>
-        )}
+  if (!recording || !rec.meeting) {
+    return (
+      <div className="page">
+        <div className="topbar">
+          <button className="ghost" onClick={onBack}>
+            <ChevronLeft size={16} aria-hidden />
+            Meetings
+          </button>
+        </div>
+        <div className="page-scroll">
+          <div className="empty-state centered">
+            {rec.phase === "starting" ? (
+              <p className="empty-title">Starting the recording…</p>
+            ) : (
+              <>
+                <p className="empty-title">Not recording</p>
+                {rec.error && <p className="error" role="alert">{rec.error}</p>}
+                <button className="primary" onClick={() => void rec.start()}>
+                  <Mic size={16} aria-hidden />
+                  {rec.error ? "Try again" : "Start recording"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       </div>
-      {warning && recording && <p className="warning" role="status">{warning}</p>}
-      {error && <p className="error" role="alert">{error}</p>}
-      {(levels.micEnded || levels.systemEnded) && recording && (
-        <p className="error" role="alert">
-          {levels.systemEnded ? "Call audio" : "Your microphone"} stopped recording unexpectedly. The rest of the meeting is still being
+    );
+  }
+
+  return (
+    <div className="page recording-page">
+      <div className="topbar rec-topbar">
+        <button className="ghost" onClick={onBack}>
+          <ChevronLeft size={16} aria-hidden />
+          Meetings
+        </button>
+        <span className="rec-dot" aria-hidden />
+        <span className="rec-time" role="timer" aria-label="Recording time">{formatDuration(rec.levels.seconds)}</span>
+        <div className="rec-meters">
+          <Meter label="You" db={rec.levels.micDbfs} />
+          <Meter label="Call audio" db={rec.levels.systemDbfs} />
+        </div>
+        <button className="primary" onClick={() => void rec.stop()} disabled={rec.phase === "stopping"}>
+          <Square size={13} aria-hidden fill="currentColor" />
+          {rec.phase === "stopping" ? "Finishing transcript…" : "Stop"}
+        </button>
+      </div>
+      {rec.warning && <p className="notice page-status" role="status">{rec.warning}</p>}
+      {rec.error && <p className="error page-status" role="alert">{rec.error}</p>}
+      {(rec.levels.micEnded || rec.levels.systemEnded) && (
+        <p className="error page-status" role="alert">
+          {rec.levels.systemEnded ? "Call audio" : "Your microphone"} stopped recording unexpectedly. The rest of the meeting is still being
           captured where possible.
         </p>
       )}
-      <div className="meeting-body">
-        <MeetingNotes
-          key={open.id}
-          meetingId={open.id}
-          title={open.title}
-          notesJson={open.notesJson}
-          enhancedMd={finished?.enhancedMd ?? ""}
-          enhancedTemplateId={finished?.enhancedTemplateId ?? ""}
-          canEnhance={!recording && finished !== null}
-        />
-        <aside className="meeting-transcript" aria-label="Transcript">
-          <h2>Transcript</h2>
-          <Transcript lines={lines} live={recording} />
+      <div className="meeting-layout with-transcript">
+        <div className="page-scroll">
+          <div className="column">
+            <MeetingNotes
+              key={rec.meeting.id}
+              meetingId={rec.meeting.id}
+              title={rec.meeting.title}
+              notesJson=""
+              enhancedMd=""
+              enhancedTemplateId=""
+              canEnhance={false}
+            />
+          </div>
+        </div>
+        <aside className="transcript-panel" aria-label="Live transcript">
+          <h2 className="panel-label">Live transcript</h2>
+          <Transcript lines={rec.lines} live />
         </aside>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -262,8 +170,8 @@ export function ModelDownload({ model, onDone }: { model: ModelStatus; onDone: (
 
   const pct = progress ? Math.floor((progress.received / progress.total) * 100) : 0;
   return (
-    <div className="empty">
-      <h1>Download the speech model</h1>
+    <div className="empty-state centered">
+      <h1 className="display small">Download the speech model</h1>
       <p>
         Parley transcribes on this Mac with the {model.label} model ({formatBytes(model.sizeBytes)}). It downloads once and is checked
         against a known checksum.

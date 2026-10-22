@@ -1,7 +1,7 @@
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Placeholder } from "@tiptap/extensions";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NotesUpdate, createAutosaver, saveNotes } from "./lib/meetings";
 
 interface Props {
@@ -12,15 +12,27 @@ interface Props {
   onFlushReady?: (flush: () => Promise<void>) => void;
   /** Called after each successful save (e.g. to refresh the meeting list's title). */
   onSaved?: () => void;
+  /** Rendered between the title and the notes (meta chips, tabs). */
+  toolbar?: ReactNode;
+  /** Keeps the editor mounted (so autosave keeps working) while another tab is shown. */
+  hideBody?: boolean;
 }
 
 type SaveState = "saved" | "saving" | "error";
 
 /** Title plus rich-text notes, autosaved to the encrypted store 800 ms after the last edit. */
-export function NotesEditor({ meetingId, initialTitle, initialJson, onFlushReady, onSaved }: Props) {
+export function NotesEditor({ meetingId, initialTitle, initialJson, onFlushReady, onSaved, toolbar, hideBody }: Props) {
   const [title, setTitle] = useState(initialTitle);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const titleRef = useRef(initialTitle);
+  const titleBox = useRef<HTMLTextAreaElement>(null);
+  // Long titles wrap; grow the field to fit instead of scrolling inside it.
+  useLayoutEffect(() => {
+    const el = titleBox.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [title]);
   const onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
 
@@ -42,7 +54,7 @@ export function NotesEditor({ meetingId, initialTitle, initialJson, onFlushReady
   const editor = useEditor({
     extensions: [
       StarterKit,
-      Placeholder.configure({ placeholder: "Jot down what matters. Parley keeps the full transcript alongside." }),
+      Placeholder.configure({ placeholder: "Write rough notes here. Parley keeps the full transcript alongside." }),
     ],
     content: initialJson ? JSON.parse(initialJson) : "",
     onUpdate: () => schedule(),
@@ -72,21 +84,30 @@ export function NotesEditor({ meetingId, initialTitle, initialJson, onFlushReady
   return (
     <div className="notes">
       <div className="notes-head">
-        <input
-          className="notes-title"
+        <textarea
+          ref={titleBox}
+          className="notes-title display"
           aria-label="Meeting title"
+          rows={1}
           value={title}
           onChange={(e) => {
-            setTitle(e.target.value);
-            titleRef.current = e.target.value;
+            setTitle(e.target.value.replace(/\n/g, " "));
+            titleRef.current = e.target.value.replace(/\n/g, " ");
             schedule();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              editor?.commands.focus("start");
+            }
           }}
         />
         <span className={`save-state save-${saveState}`} role="status">
           {saveState === "saving" ? "Saving…" : saveState === "error" ? "Couldn't save" : "Saved"}
         </span>
       </div>
-      <EditorContent editor={editor} className="notes-body" />
+      {toolbar}
+      <EditorContent editor={editor} className="notes-body" hidden={hideBody} />
     </div>
   );
 }

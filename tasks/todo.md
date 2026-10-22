@@ -51,9 +51,65 @@ Decisions: no Apple Developer membership yet, so signing and notarization switch
 - [x] **Verify.** Local release DMG build; updater end to end on this Mac: install 0.1.0, serve a signed 0.1.1 from a local feed, update and relaunch. CI green on the PR.
 - [x] **Go public + first release.** Only after you confirm: flip the repo to public, tag `v0.1.0`, publish the draft release.
 
+## UI refresh plan (2026-10-21)
+
+**Brief.** Domain: personal productivity, meeting notes on a Mac. Audience: busy professionals, mostly non-technical, using it several times a day. Mood to earn: *calm*. Motion: subtle feedback only. Layout families: index list grouped by day (Home), editorial single column (meeting), split (recording), form sections (Settings). Reference anchor: the `warm-editorial` library system, adjusted for contrast. Clean-room: the user's reference screenshots inform layout patterns only; no third-party names, assets, fonts or copy.
+
+**Tokens** (in `App.css` custom properties, no hardcoded values in components)
+- Light: paper `#FAF7F2`, raised surface `#FFFDF9`, sidebar `#F2EDE4`, ink `#1C1A17`, muted `#6B635C` (5.0:1), hairline `#E4DDD1`, accent terracotta `#B04A2B` (5.1:1 both ways; the spec's `#C0512F` fails AA at 4.1:1).
+- Dark (designed, not inverted): `#1B1916` / `#24211D` / ink `#EDE7DD` (14.3:1) / muted `#A79E94` (6.7:1) / accent `#E58A63` with dark label (6.8:1).
+- Type: display in the system serif (`ui-serif`, New York on macOS; works offline under the strict CSP), UI in the system sans. Scale 12/13/15/20/28/40. Radius 8/12/16, pill for chips. Elevation: flat + one raised level for menus and the Ask bar.
+- Icons: lucide (`lucide-react`, a version at least 2 weeks old), no emoji.
+
+**Layout and UX** (the "better" part, beyond the references)
+- [ ] Sidebar with icons: Home, Ask, Settings; a live **recording pill** (red dot, timer, Stop) visible from every view; update notice; "Encrypted on this Mac" privacy cue in place of upsell chrome.
+- [ ] **Home**: serif date header, a primary "Start recording" card with the ⌥⇧⌘R hint, the meeting-detected prompt inline, then meetings **grouped by day** (Today, Yesterday, weekday dates) as a calm list: icon, title, time and duration, "AI notes" chip. Search at the top filters in place with highlighted snippets. Friendly empty state.
+- [ ] **Meeting page** (replaces the split list+detail): back button, serif title, chip row (date, duration, template), segmented My notes / AI notes, template menu with lucide icons plus Regenerate, transcript in a collapsible side panel, Export / PDF / Delete in a "More" menu.
+- [ ] **Recording page**: big timer and meters, notes left, live transcript right; stopping lands on the meeting page.
+- [ ] **Persistent "Ask your meetings" bar** at the bottom of Home and meeting pages with 1 suggestion chip; submitting opens Ask with the question running.
+- [ ] Keyboard: ⌘N start/stop recording, ⌘K search, ⌘J Ask, Esc closes menus; full focus rings; menus are keyboard-operable (arrow keys, roving focus).
+- [ ] Settings and onboarding restyled into sectioned cards with icons; no behavior change.
+- [ ] Motion: 8px fade-up for list groups (staggered under 300ms), hover tint, press scale 0.98, menu scale-in 0.96 to 1; all removed under `prefers-reduced-motion`.
+
+**Verify**
+- [ ] Vitest for the day-grouping and relative-date helpers; existing 33 frontend + 93 Rust tests stay green.
+- [ ] Contrast script on every token pair, light and dark.
+- [ ] Live check in the signed dev build: Home, search, meeting page, menus, recording, Ask bar, Settings, onboarding; light and dark screenshots; keyboard-only pass.
+- [ ] Pre-flight aesthetic checklist; PR with before/after screenshots.
+
+## Folders, calendar and meeting apps plan (2026-10-22)
+
+Builds on the UI refresh (PR #17). Three PRs in this order, each verified in the app before the next.
+
+### 1. Folders (PR A)
+- Store migration v4: `folders` (id, name, created) and a nullable `meetings.folder_id`. One folder per meeting, which matches how people file calls (by client, team or project); deleting a folder moves its meetings back to "No folder" and never deletes a meeting.
+- Sidebar "Folders" section with counts; create inline, rename, delete from a menu.
+- Folder page: the Home list filtered to the folder, with search inside it.
+- Meeting page: a folder chip in the meta row; its menu moves the meeting or creates a folder on the spot.
+- Ask scoped to a folder: `ask_meetings` takes an optional folder id, so the Ask bar on a folder page answers from that folder only ("Ask about Acme").
+- Tests: migration from v3, folder CRUD, delete keeps meetings, folder-scoped search and Ask retrieval.
+
+### 2. Calendar (PR B)
+- Source: macOS Calendar through EventKit. It already syncs the Google, Outlook/Exchange and iCloud calendars added to the Mac, so one local integration covers all of them with no cloud sign-in and nothing new leaving the Mac. Direct Google/Microsoft OAuth is out of scope: it needs a hosted OAuth client and Google's restricted-scope verification, and duplicates what macOS Calendar already provides.
+- New Swift helper `parley-calendar` (same pattern as the audio helpers): requests full calendar access, lists events for a window as JSON, and reports calendar changes. Needs `NSCalendarsFullAccessUsageDescription` in Info.plist and the `com.apple.security.personal-information.calendars` entitlement for the hardened runtime.
+- Home "Coming up": today and tomorrow, with time, title, attendees count and a provider icon. Past days stay the meeting list.
+- Starting a recording during or just before an event uses the event's title and saves its attendees and event id (migration v5) on the meeting. Recordings from a recurring event go into the folder the last one was filed in, so a weekly 1:1 files itself.
+- Optional reminder notification 1 minute before an event with a call link.
+- Settings > Calendar: connect (permission), choose which calendars count, reminders on or off.
+- Tests: event JSON parsing, event-to-recording matching (overlap window), recurring-series folder memory.
+
+### 3. Zoom, Teams, Google Meet and Webex (PR C)
+- Local integration (recommended): read the call link from each event's URL, location and notes (zoom.us/j, teams.microsoft.com/l/meetup-join, meet.google.com, webex.com), and show a **Join** button that opens the call in its app or browser and starts Parley's recording in one click.
+- Auto-start option: when a calendar event with a call link is in progress and its app takes the microphone (the existing detection), start recording automatically instead of only prompting. Auto-stop when the call app releases the microphone for 30 s, with a "Keep recording" escape. Off by default.
+- Out of scope, and why: the vendors' cloud APIs (Zoom, Microsoft Graph, Google Meet) need hosted OAuth apps, admin consent in most companies and a server, and their recording features rely on a bot joining the call. That contradicts Parley's design (local, no bot). Reconsider only for pulling the vendors' own cloud transcripts later.
+- Tests: link extraction across real-world invite formats (Zoom personal and meeting IDs, Teams safelinks, Meet codes, Webex), auto-start and auto-stop state machine.
+
+### Docs
+- PRIVACY.md: calendar data is read on the Mac and stored only as title, time, attendees and event id on recorded meetings; nothing is uploaded.
+
 ## Deferred past v1
 
-Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integrations (Slack, Notion, CRM), sync, mobile.
+Speaker names, on-device diarization, Windows, integrations (Slack, Notion, CRM), sync, mobile.
 
 ## What you need to provide
 
