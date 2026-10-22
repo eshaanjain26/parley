@@ -267,3 +267,11 @@ kbd { font-family: inherit; border: 1px solid var(--border); border-bottom-width
 .onboarding-nav .spacer { flex: 1; }
 .onboarding .empty { text-align: left; margin: 0; max-width: none; }
 .onboarding .empty h1 { display: none; }
+
+/* Update notice in the sidebar */
+.update-notice { margin-top: auto; border: 1px solid var(--accent); border-radius: 10px; padding: 10px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.update-notice p { margin: 0 0 8px; font-size: 13px; }
+.update-notice button { width: 100%; padding: 6px 10px; font-size: 13px; }
+.update-notice .error { margin: 8px 0 0; }
+.update-actions { margin-top: 4px; margin-bottom: 8px; }
+.update-notice + .version { margin-top: 10px; }

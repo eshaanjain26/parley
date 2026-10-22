@@ -17,6 +17,7 @@ import {
 } from "./lib/settings";
 import { ModelStatus, formatBytes, listModels } from "./lib/transcript";
 import { TemplatesSection } from "./TemplatesSection";
+import { checkForUpdate } from "./lib/update";
 
 export function SettingsView() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -24,13 +25,20 @@ export function SettingsView() {
   const [models, setModels] = useState<ModelStatus[]>([]);
   const [keys, setKeys] = useState<ApiKeyStatus>({});
   const [hotkey, setHotkey] = useState("⌥⇧⌘R");
+  const [version, setVersion] = useState("");
+  const [updateStatus, setUpdateStatus] = useState("");
 
   const refreshKeys = () => apiKeyStatus().then(setKeys).catch(() => setKeys({}));
 
   useEffect(() => {
     listModels().then(setModels).catch(() => setModels([]));
     refreshKeys();
-    getAppInfo().then((i) => setHotkey(i.hotkey)).catch(() => {});
+    getAppInfo()
+      .then((i) => {
+        setHotkey(i.hotkey);
+        setVersion(i.version);
+      })
+      .catch(() => {});
     getSettings()
       .then(setSettings)
       .catch((e) => setStatus(`Couldn't load settings: ${e}`));
@@ -46,6 +54,16 @@ export function SettingsView() {
       setStatus("Saved");
     } catch (e) {
       setStatus(`Couldn't save: ${e}`);
+    }
+  };
+
+  const checkUpdates = async () => {
+    setUpdateStatus("Checking…");
+    try {
+      const update = await checkForUpdate();
+      setUpdateStatus(update ? `Parley ${update.version} is ready. Use Restart to update in the sidebar.` : "Parley is up to date.");
+    } catch (e) {
+      setUpdateStatus(`Couldn't check for updates: ${e}`);
     }
   };
 
@@ -102,6 +120,21 @@ export function SettingsView() {
           <span className="hint">Works from any app. Parley also lives in the menu bar.</span>
         </span>
       </label>
+
+      <h2>Updates</h2>
+      <label className="check">
+        <input type="checkbox" checked={settings.autoUpdate} onChange={(e) => set("autoUpdate", e.target.checked)} />
+        <span>
+          Check for updates automatically
+          <span className="hint">Parley asks GitHub for the latest release shortly after launch. Updates are signed and verified before they install.</span>
+        </span>
+      </label>
+      <div className="actions update-actions">
+        <button onClick={checkUpdates}>Check for updates</button>
+        <span className="status" role="status">
+          {updateStatus || (version ? `You have Parley ${version}.` : "")}
+        </span>
+      </div>
 
       <h2>AI notes</h2>
       <label>

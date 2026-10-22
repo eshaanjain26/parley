@@ -18,6 +18,7 @@ export interface Settings {
   detectMeetings: boolean;
   hotkeyEnabled: boolean;
   onboarded: boolean;
+  autoUpdate: boolean;
 }
 
 export interface AppInfo {

@@ -40,6 +40,8 @@ pub struct Settings {
     pub hotkey_enabled: bool,
     /// First-run setup has been completed or skipped.
     pub onboarded: bool,
+    /// Check GitHub Releases for a new version shortly after launch.
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -58,6 +60,7 @@ impl Default for Settings {
             detect_meetings: true,
             hotkey_enabled: true,
             onboarded: false,
+            auto_update: true,
         }
     }
 }
@@ -132,5 +135,6 @@ mod tests {
         assert_eq!(v["llmProvider"], "ollama");
         assert_eq!(v["ollamaUrl"], "http://127.0.0.1:11434");
         assert_eq!(v["keepAudio"], false);
+        assert_eq!(v["autoUpdate"], true);
     }
 }

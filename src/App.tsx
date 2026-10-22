@@ -5,6 +5,7 @@ import { Library } from "./Library";
 import { SettingsView } from "./SettingsView";
 import { Onboarding } from "./Onboarding";
 import { AppInfo, Settings, getAppInfo, getSettings } from "./lib/settings";
+import { UpdateInfo, installUpdate, onUpdateReady } from "./lib/update";
 
 type View = "meetings" | "ask" | "settings";
 
@@ -19,10 +20,15 @@ function App() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [openRequest, setOpenRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
 
   useEffect(() => {
     getAppInfo().then(setInfo).catch(() => setInfo(null));
     getSettings().then(setSettings).catch(() => setSettings(null));
+    const sub = onUpdateReady(setUpdate);
+    return () => {
+      sub.then((fn) => fn());
+    };
   }, []);
 
   const openMeeting = (id: string) => {
@@ -48,6 +54,7 @@ function App() {
             </button>
           ))}
         </nav>
+        {update && <UpdateNotice update={update} />}
         <div className="version">{info ? `v${info.version}` : ""}</div>
       </aside>
       <main className="content">
@@ -58,6 +65,32 @@ function App() {
         {view === "ask" && <AskView onOpenMeeting={openMeeting} />}
         {view === "settings" && <SettingsView />}
       </main>
+    </div>
+  );
+}
+
+function UpdateNotice({ update }: { update: UpdateInfo }) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const restart = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await installUpdate();
+    } catch (e) {
+      setError(String(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="update-notice" role="status">
+      <p>Parley {update.version} is ready.</p>
+      <button className="primary" onClick={restart} disabled={busy}>
+        {busy ? "Updating…" : "Restart to update"}
+      </button>
+      {error && <p className="error">{error}</p>}
     </div>
   );
 }

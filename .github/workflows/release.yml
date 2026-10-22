@@ -1,0 +1,75 @@
+name: Release
+
+# Push a tag like v0.2.0 (after `npm run set-version -- 0.2.0` is merged) to build signed
+# update bundles and DMGs for Apple silicon and Intel into a draft GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    runs-on: macos-14
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - run: npm ci
+
+      - name: Tag matches app version
+        run: npm run set-version -- "${GITHUB_REF_NAME#v}" --check
+
+      # Without a Developer ID certificate in secrets the app is ad-hoc signed: it runs after
+      # right-click > Open, but macOS asks for microphone and system-audio access again after
+      # each update. Adding the APPLE_* secrets switches on Developer ID signing and notarization.
+      - name: Choose signing
+        id: signing
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            echo "config=" >> "$GITHUB_OUTPUT"
+            echo "Signing with Developer ID and notarizing."
+          else
+            echo "config=--config src-tauri/tauri.adhoc.conf.json" >> "$GITHUB_OUTPUT"
+            echo "::warning::No APPLE_CERTIFICATE secret: building ad-hoc signed, not notarized."
+          fi
+
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Parley ${{ github.ref_name }}
+          releaseBody: See CHANGELOG.md for what changed. Download the DMG for your Mac (aarch64 for Apple silicon, x64 for Intel).
+          releaseDraft: true
+          args: --target ${{ matrix.target }} --bundles app,dmg --config src-tauri/tauri.release.conf.json ${{ steps.signing.outputs.config }}
