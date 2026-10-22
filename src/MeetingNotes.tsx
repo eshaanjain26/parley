@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { Check, ChevronDown, FileText, Handshake, LayoutTemplate, PenLine, Sparkles, Square, Timer, Users } from "lucide-react";
+import { ReactNode, useEffect, useRef, useState } from "react";
+import { Menu } from "./Menu";
 import { NotesEditor } from "./NotesEditor";
 import { Template, cancelEnhance, enhanceMeeting, listTemplates, onEnhanceDelta, renderMarkdown } from "./lib/enhance";
 import { missingKeyMessage } from "./lib/settings";
@@ -13,11 +15,21 @@ interface Props {
   /** Enhance needs the finished transcript, so it is only offered after recording stops. */
   canEnhance: boolean;
   onSaved?: () => void;
+  /** Chips under the title (date, duration). */
+  meta?: ReactNode;
 }
 
 type Tab = "mine" | "enhanced";
 
-export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhancedTemplateId, canEnhance, onSaved }: Props) {
+const TEMPLATE_ICONS: Record<string, ReactNode> = {
+  general: <FileText size={16} />,
+  "one-on-one": <Users size={16} />,
+  "sales-call": <Handshake size={16} />,
+  standup: <Timer size={16} />,
+};
+const templateIcon = (id: string) => TEMPLATE_ICONS[id] ?? <LayoutTemplate size={16} />;
+
+export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhancedTemplateId, canEnhance, onSaved, meta }: Props) {
   const [tab, setTab] = useState<Tab>(enhancedMd ? "enhanced" : "mine");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState(enhancedTemplateId || "general");
@@ -60,52 +72,82 @@ export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhanced
   const shown = streaming ?? enhanced;
   const busy = streaming !== null;
 
-  return (
-    <div className="meeting-notes">
-      <div className="notes-tabs" role="tablist">
-        <button role="tab" aria-selected={tab === "mine"} className={tab === "mine" ? "active" : ""} onClick={() => setTab("mine")}>
-          My notes
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === "enhanced"}
-          className={tab === "enhanced" ? "active" : ""}
-          onClick={() => setTab("enhanced")}
-          disabled={!enhanced && !busy}
-        >
-          Enhanced
-        </button>
+  const current = templates.find((t) => t.id === templateId);
+
+  const toolbar = (
+    <>
+      {meta && <div className="meta-row">{meta}</div>}
+      <div className="notes-toolbar">
+        <div className="segmented" role="tablist" aria-label="Notes view">
+          <button role="tab" aria-selected={tab === "mine"} className={tab === "mine" ? "active" : ""} onClick={() => setTab("mine")}>
+            <PenLine size={15} aria-hidden />
+            My notes
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === "enhanced"}
+            className={tab === "enhanced" ? "active" : ""}
+            onClick={() => setTab("enhanced")}
+            disabled={!enhanced && !busy}
+          >
+            <Sparkles size={15} aria-hidden />
+            AI notes
+          </button>
+        </div>
         {canEnhance && (
           <div className="enhance-controls">
-            <select aria-label="Template" value={templateId} onChange={(e) => setTemplateId(e.target.value)} disabled={busy}>
-              {templates.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
+            <Menu
+              label="Template"
+              heading="Templates"
+              align="end"
+              disabled={busy}
+              trigger={
+                <>
+                  <span aria-hidden>{templateIcon(templateId)}</span>
+                  {current?.name ?? "Template"}
+                  <ChevronDown size={14} aria-hidden />
+                </>
+              }
+              items={templates.map((t) => ({
+                label: t.name,
+                icon: templateIcon(t.id),
+                trailing: t.id === templateId ? <Check size={16} aria-label="Selected" /> : undefined,
+                onSelect: () => setTemplateId(t.id),
+              }))}
+            />
             {busy ? (
-              <button onClick={() => cancelEnhance()}>Stop</button>
+              <button className="secondary" onClick={() => cancelEnhance()}>
+                <Square size={13} aria-hidden fill="currentColor" />
+                Stop
+              </button>
             ) : (
               <button className="primary" onClick={enhance}>
-                {enhanced ? "Enhance again" : "Enhance notes"}
+                <Sparkles size={15} aria-hidden />
+                {enhanced ? "Rewrite AI notes" : "Write AI notes"}
               </button>
             )}
           </div>
         )}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
-      <div hidden={tab !== "mine"} className="notes-pane">
-        <NotesEditor
-          meetingId={meetingId}
-          initialTitle={title}
-          initialJson={notesJson}
-          onFlushReady={(flush) => (flushNotes.current = flush)}
-          onSaved={onSaved}
-        />
-      </div>
+    </>
+  );
+
+  return (
+    <div className="meeting-notes">
+      <NotesEditor
+        meetingId={meetingId}
+        initialTitle={title}
+        initialJson={notesJson}
+        onFlushReady={(flush) => (flushNotes.current = flush)}
+        onSaved={onSaved}
+        toolbar={toolbar}
+        hideBody={tab !== "mine"}
+      />
       {tab === "enhanced" && (
         <div className="enhanced" aria-live={busy ? "polite" : "off"} aria-busy={busy}>
           {shown ? (
-            <div className="enhanced-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(shown) }} />
+            <div className="prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(shown) }} />
           ) : (
             <p className="status">Writing notes from your notes and the transcript…</p>
           )}

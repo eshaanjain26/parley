@@ -1,3 +1,4 @@
+import { Keyboard, Lock, MenuSquare, MonitorSpeaker, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ModelDownload } from "./Recorder";
 import { Settings, updateSettings } from "./lib/settings";
@@ -46,19 +47,19 @@ export function Onboarding({ settings, hotkey, onDone }: Props) {
         {step === 0 && (
           <section>
             <span className="brand-mark big" aria-hidden>P</span>
-            <h1>Welcome to Parley</h1>
+            <h1 className="display">Welcome to Parley</h1>
             <p>Parley takes meeting notes on your Mac. It records your microphone and the call audio, writes a live transcript, and turns your rough notes into clean ones.</p>
             <ul className="onboarding-points">
-              <li>No bot joins your calls. Audio comes from your Mac.</li>
-              <li>Transcripts and notes are encrypted on this Mac, with the key in your Keychain.</li>
-              <li>Audio is deleted after transcription unless you choose to keep it.</li>
+              <li><MonitorSpeaker size={18} aria-hidden />Audio comes from your Mac, so no bot joins your calls.</li>
+              <li><Lock size={18} aria-hidden />Transcripts and notes are encrypted on this Mac, with the key in your Keychain.</li>
+              <li><Trash2 size={18} aria-hidden />Audio is deleted after transcription unless you choose to keep it.</li>
             </ul>
           </section>
         )}
 
         {step === 1 && (
           <section>
-            <h1>Transcription on this Mac</h1>
+            <h1 className="display">Transcription on this Mac</h1>
             <p>Parley transcribes with a speech model that runs locally, so audio never leaves your Mac. You can switch to Deepgram or AssemblyAI later in Settings.</p>
             {model && !model.installed ? (
               <ModelDownload model={model} onDone={refreshModels} />
@@ -71,8 +72,8 @@ export function Onboarding({ settings, hotkey, onDone }: Props) {
 
         {step === 2 && (
           <section>
-            <h1>AI-enhanced notes</h1>
-            <p>After a meeting, Enhance turns your notes and the transcript into structured notes. Choose where that runs:</p>
+            <h1 className="display">AI notes</h1>
+            <p>After a meeting, Parley turns your rough notes and the transcript into clean, structured notes. Choose where that runs:</p>
             <div className="choices">
               {[
                 { value: "ollama", title: "On this Mac with Ollama", body: "Free and private. Needs Ollama installed with a model pulled." },
@@ -99,12 +100,13 @@ export function Onboarding({ settings, hotkey, onDone }: Props) {
 
         {step === 3 && (
           <section>
-            <h1>Always one step away</h1>
+            <h1 className="display">Always one step away</h1>
             <ul className="onboarding-points">
               <li>
-                Press <kbd>{hotkey}</kbd> from any app to start or stop recording.
+                <Keyboard size={18} aria-hidden />
+                <span>Press <kbd>{hotkey}</kbd> from any app to start or stop recording.</span>
               </li>
-              <li>Parley lives in the menu bar. Closing the window keeps it running there.</li>
+              <li><MenuSquare size={18} aria-hidden />Parley lives in the menu bar. Closing the window keeps it running there.</li>
             </ul>
             <label className="check">
               <input type="checkbox" checked={draft.detectMeetings} onChange={(e) => setDraft({ ...draft, detectMeetings: e.target.checked })} />

@@ -51,6 +51,32 @@ Decisions: no Apple Developer membership yet, so signing and notarization switch
 - [x] **Verify.** Local release DMG build; updater end to end on this Mac: install 0.1.0, serve a signed 0.1.1 from a local feed, update and relaunch. CI green on the PR.
 - [x] **Go public + first release.** Only after you confirm: flip the repo to public, tag `v0.1.0`, publish the draft release.
 
+## UI refresh plan (2026-10-21)
+
+**Brief.** Domain: personal productivity, meeting notes on a Mac. Audience: busy professionals, mostly non-technical, using it several times a day. Mood to earn: *calm*. Motion: subtle feedback only. Layout families: index list grouped by day (Home), editorial single column (meeting), split (recording), form sections (Settings). Reference anchor: the `warm-editorial` library system, adjusted for contrast. Clean-room: the user's reference screenshots inform layout patterns only; no third-party names, assets, fonts or copy.
+
+**Tokens** (in `App.css` custom properties, no hardcoded values in components)
+- Light: paper `#FAF7F2`, raised surface `#FFFDF9`, sidebar `#F2EDE4`, ink `#1C1A17`, muted `#6B635C` (5.0:1), hairline `#E4DDD1`, accent terracotta `#B04A2B` (5.1:1 both ways; the spec's `#C0512F` fails AA at 4.1:1).
+- Dark (designed, not inverted): `#1B1916` / `#24211D` / ink `#EDE7DD` (14.3:1) / muted `#A79E94` (6.7:1) / accent `#E58A63` with dark label (6.8:1).
+- Type: display in the system serif (`ui-serif`, New York on macOS; works offline under the strict CSP), UI in the system sans. Scale 12/13/15/20/28/40. Radius 8/12/16, pill for chips. Elevation: flat + one raised level for menus and the Ask bar.
+- Icons: lucide (`lucide-react`, a version at least 2 weeks old), no emoji.
+
+**Layout and UX** (the "better" part, beyond the references)
+- [ ] Sidebar with icons: Home, Ask, Settings; a live **recording pill** (red dot, timer, Stop) visible from every view; update notice; "Encrypted on this Mac" privacy cue in place of upsell chrome.
+- [ ] **Home**: serif date header, a primary "Start recording" card with the ⌥⇧⌘R hint, the meeting-detected prompt inline, then meetings **grouped by day** (Today, Yesterday, weekday dates) as a calm list: icon, title, time and duration, "AI notes" chip. Search at the top filters in place with highlighted snippets. Friendly empty state.
+- [ ] **Meeting page** (replaces the split list+detail): back button, serif title, chip row (date, duration, template), segmented My notes / AI notes, template menu with lucide icons plus Regenerate, transcript in a collapsible side panel, Export / PDF / Delete in a "More" menu.
+- [ ] **Recording page**: big timer and meters, notes left, live transcript right; stopping lands on the meeting page.
+- [ ] **Persistent "Ask your meetings" bar** at the bottom of Home and meeting pages with 1 suggestion chip; submitting opens Ask with the question running.
+- [ ] Keyboard: ⌘N start/stop recording, ⌘K search, ⌘J Ask, Esc closes menus; full focus rings; menus are keyboard-operable (arrow keys, roving focus).
+- [ ] Settings and onboarding restyled into sectioned cards with icons; no behavior change.
+- [ ] Motion: 8px fade-up for list groups (staggered under 300ms), hover tint, press scale 0.98, menu scale-in 0.96 to 1; all removed under `prefers-reduced-motion`.
+
+**Verify**
+- [ ] Vitest for the day-grouping and relative-date helpers; existing 33 frontend + 93 Rust tests stay green.
+- [ ] Contrast script on every token pair, light and dark.
+- [ ] Live check in the signed dev build: Home, search, meeting page, menus, recording, Ask bar, Settings, onboarding; light and dark screenshots; keyboard-only pass.
+- [ ] Pre-flight aesthetic checklist; PR with before/after screenshots.
+
 ## Deferred past v1
 
 Calendar (EventKit/Google), speaker names, on-device diarization, Windows, integrations (Slack, Notion, CRM), sync, mobile.
