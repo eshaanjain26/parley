@@ -260,3 +260,9 @@ Speaker names, on-device diarization, Windows, integrations (Slack, Notion, CRM)
 - Settings > Calendar: reminders (on by default), automatic recording (off by default, with a note to tell people on the call).
 - Tests: Rust 115 (11 new), Vitest 45.
 - Not checked in the app (disk full).
+
+### Live check of the UI refresh, folders, calendar and meeting apps (2026-10-22, signed debug build from main)
+
+- Checked in the app: Home (greeting, start card, connect card, day groups, Ask bar); calendar connect (access granted, Coming up shown, Settings lists the Mac's Google, subscribed, other and iCloud calendars through the helper); folder create from the sidebar, folder page, filing a meeting from its chip by keyboard (menu opens with Down, Return picks), sidebar count, folder-scoped search, folder-scoped Ask (answer cites only the folder's meeting, via the configured Anthropic key); recording from Home (recording page, sidebar pill, Home recording card, "Recording now" row, stop from the pill lands on the meeting page); More menu by keyboard, inline delete confirmation, delete.
+- Found and fixed: search snippets from AI notes showed raw Markdown (`##`, `**`). Snippets are now plain text with highlights kept.
+- Not checked: Join, reminders and automatic start/stop (no calendar events with call links on this Mac's calendars; adding test events would sync to the user's Google calendar), dark mode (needs a system appearance change).
