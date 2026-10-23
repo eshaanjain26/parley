@@ -60,8 +60,23 @@ export interface SnippetPart {
   hit: boolean;
 }
 
-/** Splits a search snippet into plain and highlighted runs. */
+/**
+ * Snippets from AI notes are Markdown: drop heading marks, emphasis, code ticks, list bullets and
+ * task boxes so the row reads as text. Highlight markers are kept.
+ */
+export function plainSnippet(snippet: string): string {
+  return snippet
+    .replace(/(^|\s)#{1,6}(?=\s)/g, "$1")
+    .replace(/\*\*|__|`/g, "")
+    .replace(/(^|\s)[-*+](?=\s)/g, "$1")
+    .replace(/\[[ xX]\]\s?/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Splits a search snippet into plain and highlighted runs (Markdown removed). */
 export function splitSnippet(snippet: string): SnippetPart[] {
+  snippet = plainSnippet(snippet);
   const parts: SnippetPart[] = [];
   let hit = false;
   let buf = "";

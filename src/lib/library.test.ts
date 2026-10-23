@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatMinutes, formatWhen, splitSnippet, utcOffsetMinutes } from "./library";
+import { formatMinutes, formatWhen, plainSnippet, splitSnippet, utcOffsetMinutes } from "./library";
 
 describe("splitSnippet", () => {
   it("separates highlighted matches from plain text", () => {
@@ -46,5 +46,19 @@ describe("utcOffsetMinutes", () => {
   it("is the negated JS timezone offset", () => {
     const d = new Date();
     expect(utcOffsetMinutes(d)).toBe(-d.getTimezoneOffset());
+  });
+});
+
+describe("plainSnippet", () => {
+  it("removes Markdown from AI-notes snippets and keeps highlights", () => {
+    const raw = "## Summary The quarterly budget review moves to **\u0001Friday\u0002**. ## Decisions - Review on \u0001Friday\u0002 ## Action items - [ ] Send numbers";
+    expect(plainSnippet(raw)).toBe(
+      "Summary The quarterly budget review moves to \u0001Friday\u0002. Decisions Review on \u0001Friday\u0002 Action items Send numbers",
+    );
+  });
+
+  it("leaves ordinary text, hyphenated words and hashtags alone", () => {
+    expect(plainSnippet("a well-known #launch plan - 3 items")).toBe("a well-known #launch plan 3 items");
+    expect(plainSnippet("…owns \u0001Priya\u0002's forecast")).toBe("…owns \u0001Priya\u0002's forecast");
   });
 });
