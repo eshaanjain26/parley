@@ -1,5 +1,5 @@
-import { AudioLines, CalendarClock, CalendarDays, KeyRound, RefreshCw, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AudioLines, CalendarClock, CalendarDays, KeyRound, Monitor, Moon, Palette, RefreshCw, Sparkles, Sun } from "lucide-react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import {
   ApiKeyStatus,
   KEY_LABELS,
@@ -20,6 +20,7 @@ import { ModelStatus, formatBytes, listModels } from "./lib/transcript";
 import { TemplatesSection } from "./TemplatesSection";
 import { CalendarInfo, connectCalendar, listCalendars } from "./lib/calendar";
 import { createAutosaver } from "./lib/meetings";
+import { ACCENTS, Theme, applyAppearance } from "./lib/theme";
 import { checkForUpdate } from "./lib/update";
 
 export function SettingsView() {
@@ -106,6 +107,56 @@ export function SettingsView() {
             <h1 className="display">Settings</h1>
             <p className="status settings-status" role="status">{status || "Changes save automatically."}</p>
           </header>
+
+          <div className="settings-card">
+            <h2 className="section-title"><Palette size={17} aria-hidden />Appearance</h2>
+            <div className="appearance-row">
+              <span className="field-label" id="theme-label">Theme</span>
+              <div className="segmented" role="radiogroup" aria-labelledby="theme-label">
+                {(
+                  [
+                    { value: "light", label: "Light", icon: <Sun size={15} aria-hidden /> },
+                    { value: "dark", label: "Dark", icon: <Moon size={15} aria-hidden /> },
+                    { value: "system", label: "Match system", icon: <Monitor size={15} aria-hidden /> },
+                  ] as { value: Theme; label: string; icon: ReactNode }[]
+                ).map((t) => (
+                  <button
+                    key={t.value}
+                    role="radio"
+                    aria-checked={settings.theme === t.value}
+                    className={settings.theme === t.value ? "active" : ""}
+                    onClick={() => {
+                      set("theme", t.value);
+                      applyAppearance(t.value, settings.accent);
+                    }}
+                  >
+                    {t.icon}
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="appearance-row">
+              <span className="field-label" id="accent-label">Accent</span>
+              <div className="swatches" role="radiogroup" aria-labelledby="accent-label">
+                {ACCENTS.map((a) => (
+                  <button
+                    key={a.value}
+                    role="radio"
+                    aria-checked={settings.accent === a.value}
+                    className={`swatch${settings.accent === a.value ? " active" : ""}`}
+                    onClick={() => {
+                      set("accent", a.value);
+                      applyAppearance(settings.theme, a.value);
+                    }}
+                  >
+                    <span className="swatch-dot" style={{ background: a.swatch }} aria-hidden />
+                    {a.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
 
           <div className="settings-card">
             <h2 className="section-title"><AudioLines size={17} aria-hidden />Transcription</h2>

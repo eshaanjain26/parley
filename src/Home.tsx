@@ -2,6 +2,7 @@ import { Ellipsis, FileText, Folder as FolderIcon, Mic, Pencil, Search, Sparkles
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AskBar } from "./AskBar";
 import { ComingUp } from "./ComingUp";
+import { EmptyArt } from "./EmptyArt";
 import { FolderNameForm, useFolders } from "./Folders";
 import { Menu } from "./Menu";
 import { useRecording } from "./RecordingContext";
@@ -222,7 +223,7 @@ export function Home({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === "Escape" && setQuery("")}
           />
-          {!query && <kbd aria-hidden>⌘K</kbd>}
+          {!query && <kbd aria-hidden>/</kbd>}
         </div>
 
         {error && <p className="error" role="alert">{error}</p>}
@@ -237,11 +238,13 @@ export function Home({
               <p>Nothing matches “{query.trim()}”. Try a name, a topic or a phrase someone said.</p>
             ) : folder ? (
               <>
+                <EmptyArt />
                 <p className="empty-title">Nothing in {folder.name} yet</p>
                 <p className="muted">Record here, or open a meeting and pick this folder from its folder chip.</p>
               </>
             ) : (
               <>
+                <EmptyArt />
                 <p className="empty-title">Your meetings will live here</p>
                 <p className="muted">Start a recording when a call begins. Notes, transcript and AI summary land in this list.</p>
               </>

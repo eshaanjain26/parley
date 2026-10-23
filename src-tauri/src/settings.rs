@@ -50,6 +50,10 @@ pub struct Settings {
     pub event_reminders: bool,
     /// Start recording when a calendar call's app joins, and stop after it leaves.
     pub auto_record: bool,
+    /// "system", "light" or "dark".
+    pub theme: String,
+    /// "ember", "ocean", "forest" or "plum".
+    pub accent: String,
 }
 
 impl Default for Settings {
@@ -73,6 +77,8 @@ impl Default for Settings {
             calendar_ids: Vec::new(),
             event_reminders: true,
             auto_record: false,
+            theme: "system".into(),
+            accent: "ember".into(),
         }
     }
 }
@@ -152,5 +158,7 @@ mod tests {
         assert_eq!(v["calendarIds"], serde_json::json!([]));
         assert_eq!(v["eventReminders"], true);
         assert_eq!(v["autoRecord"], false);
+        assert_eq!(v["theme"], "system");
+        assert_eq!(v["accent"], "ember");
     }
 }

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Accent, Theme } from "./theme";
 
 // Mirrors src-tauri/src/settings.rs. The Rust test `wire_format_matches_typescript_types` guards the shape.
 export type SpeechProvider = "local-whisper" | "deepgram" | "assembly-ai";
@@ -26,6 +27,8 @@ export interface Settings {
   eventReminders: boolean;
   /** Start recording when a calendar call's app joins, and stop after it leaves. */
   autoRecord: boolean;
+  theme: Theme;
+  accent: Accent;
 }
 
 export interface AppInfo {

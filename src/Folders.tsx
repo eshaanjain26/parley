@@ -1,6 +1,7 @@
 import { Check, ChevronDown, Folder as FolderIcon, FolderInput, FolderMinus, FolderPlus, X } from "lucide-react";
 import { ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Menu } from "./Menu";
+import { useToast } from "./Toasts";
 import { onStoreReady } from "./lib/library";
 import { Folder, checkFolderName, createFolder, listFolders, setMeetingFolder } from "./lib/folders";
 
@@ -127,6 +128,7 @@ export function FolderNameForm({
 /** The folder chip on a meeting: shows where it's filed and moves it. */
 export function FolderChip({ meetingId, folderId, onChange }: { meetingId: string; folderId: string | null; onChange: (id: string | null) => void }) {
   const { folders, byId, refresh, create } = useFolders();
+  const toast = useToast();
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const current = byId(folderId);
@@ -137,6 +139,7 @@ export function FolderChip({ meetingId, folderId, onChange }: { meetingId: strin
       await setMeetingFolder(meetingId, id);
       onChange(id);
       refresh();
+      toast(id ? `Moved to ${byId(id)?.name ?? "folder"}` : "Removed from folder");
     } catch (e) {
       setError(String(e));
     }

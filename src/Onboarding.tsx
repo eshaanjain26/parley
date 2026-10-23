@@ -1,5 +1,6 @@
 import { Keyboard, Lock, MenuSquare, MonitorSpeaker, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Logo } from "./Logo";
 import { ModelDownload } from "./Recorder";
 import { Settings, updateSettings } from "./lib/settings";
 import { ModelStatus, listModels } from "./lib/transcript";
@@ -46,7 +47,7 @@ export function Onboarding({ settings, hotkey, onDone }: Props) {
 
         {step === 0 && (
           <section>
-            <span className="brand-mark big" aria-hidden>P</span>
+            <Logo size={44} />
             <h1 className="display">Welcome to Parley</h1>
             <p>Parley takes meeting notes on your Mac. It records your microphone and the call audio, writes a live transcript, and turns your rough notes into clean ones.</p>
             <ul className="onboarding-points">

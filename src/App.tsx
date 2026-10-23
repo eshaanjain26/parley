@@ -1,7 +1,24 @@
-import { Folder as FolderIcon, House, Lock, MessageCircleQuestion, PhoneOff, Plus, Settings as SettingsIcon, Square } from "lucide-react";
+import {
+  Folder as FolderIcon,
+  FolderPlus,
+  House,
+  Lock,
+  MessageCircleQuestion,
+  Mic,
+  Monitor,
+  Moon,
+  PhoneOff,
+  Plus,
+  Settings as SettingsIcon,
+  Square,
+  Sun,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import { AskView } from "./AskView";
+import { Command, CommandPalette } from "./CommandPalette";
+import { ToastProvider, useToast } from "./Toasts";
+import { Logo } from "./Logo";
 import { FolderNameForm, FoldersProvider, useFolders } from "./Folders";
 import { Home } from "./Home";
 import { MeetingPage } from "./MeetingPage";
@@ -11,8 +28,9 @@ import { RecordingProvider, useRecording } from "./RecordingContext";
 import { SettingsView } from "./SettingsView";
 import { MeetingDetected, onMeetingDetected } from "./lib/library";
 import { formatDuration } from "./lib/recording";
-import { AppInfo, Settings, getAppInfo, getSettings } from "./lib/settings";
+import { AppInfo, Settings, getAppInfo, getSettings, updateSettings } from "./lib/settings";
 import { UpdateInfo, installUpdate, onUpdateReady } from "./lib/update";
+import { Theme, applyAppearance } from "./lib/theme";
 
 type Route =
   | { name: "home" }
@@ -35,7 +53,12 @@ function App() {
 
   useEffect(() => {
     getAppInfo().then(setInfo).catch(() => setInfo(null));
-    getSettings().then(setSettings).catch(() => setSettings(null));
+    getSettings()
+      .then((s) => {
+        setSettings(s);
+        applyAppearance(s.theme, s.accent);
+      })
+      .catch(() => setSettings(null));
   }, []);
 
   if (settings && !settings.onboarded) {
@@ -43,15 +66,17 @@ function App() {
   }
 
   return (
-    <FoldersProvider>
-      <RecordingProvider
-        onStarted={() => setRoute({ name: "recording" })}
-        onNeedsAttention={() => setRoute({ name: "recording" })}
-        onFinished={(id) => setRoute({ name: "meeting", id })}
-      >
-        <Shell route={route} setRoute={setRoute} info={info} />
-      </RecordingProvider>
-    </FoldersProvider>
+    <ToastProvider>
+      <FoldersProvider>
+        <RecordingProvider
+          onStarted={() => setRoute({ name: "recording" })}
+          onNeedsAttention={() => setRoute({ name: "recording" })}
+          onFinished={(id) => setRoute({ name: "meeting", id })}
+        >
+          <Shell route={route} setRoute={setRoute} info={info} />
+        </RecordingProvider>
+      </FoldersProvider>
+    </ToastProvider>
   );
 }
 
@@ -59,6 +84,8 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
   const rec = useRecording();
   const folders = useFolders();
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const toast = useToast();
   const [detected, setDetected] = useState<MeetingDetected | null>(null);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [focusSearch, setFocusSearch] = useState(0);
@@ -84,13 +111,20 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
   // App-wide shortcuts. ⌘N mirrors the global ⌥⇧⌘R so it works without the hotkey too.
   const keys = useRef<(e: KeyboardEvent) => void>(() => {});
   keys.current = (e) => {
+    // "/" jumps to the page's search box, unless the user is typing somewhere.
+    const target = e.target as HTMLElement | null;
+    const typing = target?.closest("input, textarea, select, [contenteditable='true']");
+    if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey && !typing) {
+      if (route.name !== "home" && route.name !== "folder") setRoute({ name: "home" });
+      setFocusSearch(Date.now());
+      e.preventDefault();
+      return;
+    }
     if (!e.metaKey || e.altKey || e.ctrlKey) return;
     const k = e.key.toLowerCase();
     if (k === "n") rec.toggle();
-    else if (k === "k") {
-      setRoute({ name: "home" });
-      setFocusSearch(Date.now());
-    } else if (k === "j") ask();
+    else if (k === "k") setPaletteOpen((o) => !o);
+    else if (k === "j") ask();
     else if (k === ",") setRoute({ name: "settings" });
     else return;
     e.preventDefault();
@@ -102,13 +136,63 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
   }, []);
 
   const active = route.name === "meeting" || route.name === "recording" ? "home" : route.name;
+
+  const setTheme = async (theme: Theme) => {
+    try {
+      const current = await getSettings();
+      applyAppearance(theme, current.accent);
+      await updateSettings({ ...current, theme });
+      toast(theme === "system" ? "Theme follows your Mac" : `${theme === "dark" ? "Dark" : "Light"} theme on`);
+    } catch {
+      // The palette closes either way; Settings shows the saved theme.
+    }
+  };
+
+  const commands: Command[] = [
+    {
+      id: "record",
+      group: "Actions",
+      label: recording ? "Stop recording" : "Start recording",
+      icon: recording ? <Square size={15} /> : <Mic size={16} />,
+      shortcut: "⌘N",
+      run: rec.toggle,
+    },
+    { id: "ask", group: "Actions", label: "Ask your meetings", icon: <MessageCircleQuestion size={16} />, shortcut: "⌘J", run: () => ask() },
+    {
+      id: "new-folder",
+      group: "Actions",
+      label: "New folder",
+      icon: <FolderPlus size={16} />,
+      run: () => setCreatingFolder(true),
+    },
+    { id: "home", group: "Go to", label: "Home", icon: <House size={16} />, run: () => setRoute({ name: "home" }) },
+    { id: "settings", group: "Go to", label: "Settings", icon: <SettingsIcon size={16} />, shortcut: "⌘,", run: () => setRoute({ name: "settings" }) },
+    ...folders.folders.map((f) => ({
+      id: `folder:${f.id}`,
+      group: "Folders" as const,
+      label: f.name,
+      icon: <FolderIcon size={16} />,
+      shortcut: `${f.meetingCount}`,
+      run: () => setRoute({ name: "folder", id: f.id }),
+    })),
+    { id: "theme-light", group: "Appearance", label: "Light theme", icon: <Sun size={16} />, run: () => void setTheme("light") },
+    { id: "theme-dark", group: "Appearance", label: "Dark theme", icon: <Moon size={16} />, run: () => void setTheme("dark") },
+    { id: "theme-system", group: "Appearance", label: "Match system theme", icon: <Monitor size={16} />, run: () => void setTheme("system") },
+  ];
   const openFolder = route.name === "folder" ? folders.byId(route.id) : undefined;
 
   return (
     <div className="shell">
+      {paletteOpen && (
+        <CommandPalette
+          commands={commands}
+          onClose={() => setPaletteOpen(false)}
+          onOpenMeeting={(id) => setRoute({ name: "meeting", id })}
+        />
+      )}
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden>P</span>
+          <Logo size={24} />
           <span className="brand-name">Parley</span>
         </div>
         <nav aria-label="Main">
@@ -141,6 +225,7 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
                 const folder = await folders.create(name);
                 setCreatingFolder(false);
                 setRoute({ name: "folder", id: folder.id });
+                toast(`Folder “${folder.name}” created`);
               }}
             />
           )}
@@ -225,7 +310,10 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
             key={route.id}
             id={route.id}
             onBack={() => setRoute({ name: "home" })}
-            onDeleted={() => setRoute({ name: "home" })}
+            onDeleted={() => {
+              setRoute({ name: "home" });
+              toast("Meeting deleted");
+            }}
             onAsk={ask}
           />
         )}

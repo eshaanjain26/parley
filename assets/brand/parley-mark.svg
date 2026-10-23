@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Parley</title>
+  <defs>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2640"/>
+      <stop offset="1" stop-color="#0e1424"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS icon grid: an 824 px body inset 100 px, as Apple's templates use. -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#ink)"/>
+  <!-- A speech bubble whose tail is the stem of a P; the three dots are the P's counter. -->
+  <path fill="#fb923c" d="M356 290h188c112 0 202 90 202 200s-90 200-202 200H440v62c0 30-24 54-54 54h-2c-30 0-54-24-54-54V316c0-14 12-26 26-26z"/>
+  <circle cx="454" cy="490" r="30" fill="#0e1424"/>
+  <circle cx="546" cy="490" r="30" fill="#0e1424"/>
+  <circle cx="638" cy="490" r="30" fill="#0e1424"/>
+</svg>
