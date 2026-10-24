@@ -12,7 +12,7 @@ This page lists everything Parley stores and every place it can send data, so yo
 |---|---|---|
 | Transcripts, notes, enhanced notes, templates | `~/Library/Application Support/com.eshaanjain.parley/parley.db` | SQLCipher (AES-256) encryption. The key is random, generated on first launch and stored in your login Keychain. |
 | Audio recordings | Same folder, `recordings/`, one subfolder per meeting | Deleted once the transcript is saved. Kept only if you turn on "Keep audio recordings". Not encrypted while they exist. |
-| API keys | macOS Keychain | Never written to disk by Parley; the interface only learns whether a key is set. |
+| API keys | macOS Keychain | Not written to disk by release builds; the interface only learns whether a key is set. Developer builds (built from source in debug mode) keep keys and the database key in `dev-secrets.json`, readable only by your user account. |
 | Settings | `~/Library/Application Support/com.eshaanjain.parley/settings.json` | Plain JSON. Holds choices like provider and model names, never keys or content. |
 | Speech models | Same folder, `models/` | Public model files. |
 | Calendar link on a recording | Inside the encrypted database: the event's id and the names and email addresses of the people invited | Encrypted with everything else. Only for meetings you record. |

@@ -78,11 +78,13 @@ The app lands in `src-tauri/target/release/bundle/macos/`.
 
 ### Signing dev builds
 
-Unsigned builds get a new identity on every rebuild, so macOS asks again for microphone, system audio and Keychain access. Create a local code-signing certificate once (Keychain Access > Certificate Assistant > Create a Certificate, type "Code Signing", then set it to Always Trust for code signing) and build with it:
+Unsigned builds get a new identity on every rebuild, so macOS asks again for microphone and system-audio access. Create a local code-signing certificate once (Keychain Access > Certificate Assistant > Create a Certificate, type "Code Signing", then set it to Always Trust for code signing) and build with it:
 
 ```bash
 APPLE_SIGNING_IDENTITY="Parley Dev" npm run tauri build -- --debug --bundles app
 ```
+
+Debug builds keep the database key and API keys in `~/Library/Application Support/com.eshaanjain.parley/dev-secrets.json` (readable only by you) instead of the Keychain. A self-signed build has no Team ID, so the Keychain would ask for your password after every rebuild. The first debug launch moves existing Keychain secrets into the file (one last prompt). Release builds use the Keychain.
 
 ### Releasing
 

@@ -770,7 +770,7 @@ fn open_store(app: &tauri::AppHandle) -> Result<Store, String> {
         Some(hex) => store::parse_key(&hex)?,
         // Never mint a new key for an existing database: it could not be read with it.
         None if path.exists() => {
-            return Err("your meeting database's key is missing from the Keychain".into());
+            return Err("your meeting database's key is missing (Keychain, or dev-secrets.json in debug builds)".into());
         }
         None => {
             let key = store::new_key()?;
@@ -990,6 +990,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(StoreState::default())
         .setup(|app| {
+            secrets::init(app.path().app_data_dir()?);
             // Reading the database key can wait on a macOS Keychain prompt. Off the main thread,
             // so the window still appears and can say what it's waiting for.
             let handle = app.handle().clone();
