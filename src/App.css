@@ -65,6 +65,7 @@
 
   --column: 760px;
 
+  color-scheme: light;
   font-family: var(--font-ui);
   font-size: var(--text-base);
   font-feature-settings: "cv11", "ss01";
@@ -76,6 +77,8 @@
 
 /* Dark is designed, not inverted: elevation reads as lighter ink. */
 :root[data-mode="dark"] {
+  /* Native controls (checkboxes, selects, scrollbars) follow the theme too. */
+  color-scheme: dark;
   --paper: #0d1220;
   --raised: #151c2e;
   --sunken: #1c2438;
@@ -132,7 +135,10 @@ body { margin: 0; background: var(--paper); }
 button, input, select, textarea { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 
-.display { font-family: var(--font-display); font-variation-settings: "opsz" 144; font-weight: 560; letter-spacing: -0.025em; line-height: 1.1; }
+/* Fraunces' optical size is set per size: WebKit doesn't pick it automatically for this font,
+   and the largest size's narrow spacing makes small titles run together. */
+.display { font-family: var(--font-display); font-variation-settings: "opsz" 30; font-weight: 560; letter-spacing: 0; line-height: 1.15; }
+.page-header h1.display { font-variation-settings: "opsz" 96; letter-spacing: -0.02em; }
 .muted { color: var(--muted); }
 .tabular { font-variant-numeric: tabular-nums; }
 .spacer { flex: 1; }
@@ -207,9 +213,16 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4) var(--space-3);
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: var(--space-1) var(--space-2) var(--space-2); }
-.brand-name { font-family: var(--font-display); font-variation-settings: "opsz" 48; font-weight: 600; font-size: 21px; letter-spacing: -0.02em; }
+.brand-name { font-family: var(--font-display); font-variation-settings: "opsz" 24; font-weight: 600; font-size: 21px; letter-spacing: -0.02em; }
 .logo { flex-shrink: 0; display: block; }
 nav { display: flex; flex-direction: column; gap: 2px; }
+.palette-trigger {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline); background: var(--sunken); color: var(--muted); font-size: var(--text-sm); text-align: left;
+  transition: border-color var(--fast) var(--ease-out), color var(--fast) var(--ease-out);
+}
+.palette-trigger span { flex: 1; }
+.palette-trigger:hover { border-color: var(--control); color: var(--ink); }
 .nav-item {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
   border: 0; background: transparent; color: var(--muted); padding: 8px 10px; border-radius: var(--radius-sm);
@@ -491,14 +504,15 @@ nav { display: flex; flex-direction: column; gap: 2px; }
   padding: 5px 12px; border-radius: 6px; font-weight: 550; font-size: var(--text-sm);
   transition: background var(--fast) var(--ease-out), color var(--fast) var(--ease-out);
 }
-.segmented button.active { background: var(--raised); color: var(--ink); box-shadow: 0 1px 2px rgb(28 26 23 / 0.08); }
+.segmented button.active { background: var(--raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--hairline-strong), 0 1px 2px rgb(18 24 38 / 0.08); }
+.segmented button.active svg { color: var(--accent); }
 .enhance-controls { margin-left: auto; display: flex; gap: var(--space-2); align-items: center; }
 .notes-body .tiptap { outline: none; line-height: 1.7; min-height: 40vh; }
 .notes-body .tiptap > :first-child { margin-top: 0; }
 .notes-body .tiptap p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--muted); float: left; height: 0; pointer-events: none; }
 .notes-body .tiptap ul, .notes-body .tiptap ol { padding-left: 22px; }
 .prose { line-height: 1.7; max-width: 68ch; }
-.prose h1, .prose h2, .prose h3 { font-family: var(--font-display); letter-spacing: -0.01em; line-height: 1.25; }
+.prose h1, .prose h2, .prose h3 { font-family: var(--font-display); font-variation-settings: "opsz" 24; letter-spacing: 0; line-height: 1.25; }
 .prose h2 { font-size: var(--text-lg); margin: var(--space-5) 0 var(--space-2); }
 .prose h3 { font-size: 17px; margin: var(--space-4) 0 var(--space-1); }
 .prose > :first-child { margin-top: 0; }

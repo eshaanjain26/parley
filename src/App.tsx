@@ -9,6 +9,7 @@ import {
   Moon,
   PhoneOff,
   Plus,
+  Search,
   Settings as SettingsIcon,
   Square,
   Sun,
@@ -195,6 +196,11 @@ function Shell({ route, setRoute, info }: { route: Route; setRoute: (r: Route) =
           <Logo size={24} />
           <span className="brand-name">Parley</span>
         </div>
+        <button className="palette-trigger" onClick={() => setPaletteOpen(true)}>
+          <Search size={15} aria-hidden />
+          <span>Search or jump to…</span>
+          <kbd aria-hidden>⌘K</kbd>
+        </button>
         <nav aria-label="Main">
           {NAV.map(({ name, label, icon: Icon, shortcut }) => (
             <button
