@@ -496,6 +496,12 @@ fn keep_recording(watch: State<'_, CallWatchState>) -> Result<(), String> {
     Ok(())
 }
 
+/// The built-in template that fits a meeting title, if any.
+#[tauri::command]
+fn suggest_template(title: String) -> Option<&'static str> {
+    enhance::suggest_template(&title)
+}
+
 #[tauri::command]
 fn list_folders(store: State<'_, StoreState>) -> Result<Vec<store::Folder>, String> {
     store.get()?.list_folders()
@@ -1062,6 +1068,7 @@ pub fn run() {
             cancel_enhance,
             list_meetings,
             list_folders,
+            suggest_template,
             join_call,
             follow_call,
             keep_recording,

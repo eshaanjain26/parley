@@ -1,8 +1,9 @@
-import { Check, ChevronDown, FileText, Handshake, LayoutTemplate, PenLine, Sparkles, Square, Timer, Users } from "lucide-react";
+import { Check, ChevronDown, PenLine, Sparkles, Square } from "lucide-react";
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { Menu } from "./Menu";
 import { NotesEditor } from "./NotesEditor";
-import { Template, cancelEnhance, enhanceMeeting, listTemplates, onEnhanceDelta, renderMarkdown } from "./lib/enhance";
+import { templateIcon } from "./templateIcons";
+import { Template, cancelEnhance, enhanceMeeting, listTemplates, onEnhanceDelta, renderMarkdown, suggestTemplate } from "./lib/enhance";
 import { missingKeyMessage } from "./lib/settings";
 
 interface Props {
@@ -21,14 +22,6 @@ interface Props {
 
 type Tab = "mine" | "enhanced";
 
-const TEMPLATE_ICONS: Record<string, ReactNode> = {
-  general: <FileText size={16} />,
-  "one-on-one": <Users size={16} />,
-  "sales-call": <Handshake size={16} />,
-  standup: <Timer size={16} />,
-};
-const templateIcon = (id: string) => TEMPLATE_ICONS[id] ?? <LayoutTemplate size={16} />;
-
 export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhancedTemplateId, canEnhance, onSaved, meta }: Props) {
   const [tab, setTab] = useState<Tab>(enhancedMd ? "enhanced" : "mine");
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -40,8 +33,18 @@ export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhanced
   // A fast double click lands before React re-renders, so guard with a ref, not state.
   const inFlight = useRef(false);
 
+  const [suggested, setSuggested] = useState<string | null>(null);
+
   useEffect(() => {
     listTemplates().then(setTemplates).catch(() => setTemplates([]));
+    // A meeting named "Weekly 1:1" or "Acme demo" starts on the matching template.
+    suggestTemplate(title)
+      .then((id) => {
+        setSuggested(id);
+        if (id && !enhancedTemplateId) setTemplateId(id);
+      })
+      .catch(() => {});
+    // The title at mount is what the meeting (or its calendar event) was called.
   }, []);
 
   const enhance = async () => {
@@ -111,7 +114,12 @@ export function MeetingNotes({ meetingId, title, notesJson, enhancedMd, enhanced
               items={templates.map((t) => ({
                 label: t.name,
                 icon: templateIcon(t.id),
-                trailing: t.id === templateId ? <Check size={16} aria-label="Selected" /> : undefined,
+                trailing:
+                  t.id === templateId ? (
+                    <Check size={16} aria-label="Selected" />
+                  ) : t.id === suggested ? (
+                    <span className="menu-badge">Suggested</span>
+                  ) : undefined,
                 onSelect: () => setTemplateId(t.id),
               }))}
             />

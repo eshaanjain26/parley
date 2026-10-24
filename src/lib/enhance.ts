@@ -10,6 +10,8 @@ export interface Template {
   name: string;
   instructions: string;
   builtIn: boolean;
+  /** One line for the gallery; empty for custom templates. */
+  description: string;
 }
 
 export interface EnhanceDelta {
@@ -23,6 +25,8 @@ export const deleteTemplate = (id: string) => invoke<void>("delete_template", { 
 export const enhanceMeeting = (meetingId: string, templateId: string) =>
   invoke<Meeting>("enhance_meeting", { meetingId, templateId });
 export const cancelEnhance = () => invoke<void>("cancel_enhance");
+/** The built-in template id that fits a meeting title, or null. */
+export const suggestTemplate = (title: string) => invoke<string | null>("suggest_template", { title });
 export const onEnhanceDelta = (cb: (d: EnhanceDelta) => void): Promise<UnlistenFn> =>
   listen<EnhanceDelta>("enhance-delta", (e) => cb(e.payload));
 
@@ -39,5 +43,6 @@ export function newTemplate(): Template {
     name: "",
     instructions: "## Summary\n\n## Decisions\n\n## Action items\n- [ ] Task (owner, due date)",
     builtIn: false,
+    description: "",
   };
 }

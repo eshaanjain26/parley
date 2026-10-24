@@ -633,6 +633,7 @@ impl Store {
         let rows = stmt
             .query_map([], |r| {
                 Ok(Template {
+                    description: String::new(),
                     id: r.get(0)?,
                     name: r.get(1)?,
                     instructions: r.get(2)?,
@@ -826,6 +827,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::open(&dir.path().join("parley.db"), &KEY).unwrap();
         let t = |id: &str, name: &str| Template {
+            description: String::new(),
             id: id.into(),
             name: name.into(),
             instructions: "## Risks".into(),

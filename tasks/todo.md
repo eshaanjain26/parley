@@ -123,7 +123,7 @@ Decisions (from the user): file key in dev builds only; Mac Calendar accounts pl
 - Interaction: ⌘K command palette (go to, search meetings, start recording, new folder, switch theme); hover previews of AI notes on Home rows; empty-state illustrations; toast feedback for saves and moves; keyboard hints throughout.
 - Pre-flight aesthetic check and contrast script; before and after screenshots.
 
-### M10: More AI note templates
+### M10: More AI note templates (done)
 - New built-ins with icons: Customer discovery, Product demo, Customer check-in, Interview (hiring), Project kickoff, Retrospective, Weekly team meeting, Exec or board update, Brainstorm, Troubleshooting, Partner or negotiation, Lecture or learning session.
 - Template gallery in Settings with a preview of each structure; "copy and edit" for any built-in.
 - Suggested template per meeting from the event title and attendees (for example "1:1", "standup", "interview", external domains suggest a customer template); one click to accept.
@@ -308,3 +308,11 @@ Windows, integrations (Slack, Notion, CRM), sync, mobile.
 
 - Light and dark Home, Settings and meeting page; theme and accent apply instantly and survive relaunch; Ocean accent recolors logo, buttons and icons; command palette opens from the sidebar button, searches folders and meetings, keyboard selection opens the result.
 - Fixed during the check: native checkboxes and selects stayed light in dark mode (added `color-scheme`); the selected segmented option was hard to see in dark (border and accent icon); serif titles ran words together because WebKit used Fraunces' largest optical size, so optical sizes are now set per size; added a visible "Search or jump to… ⌘K" button so the palette is discoverable.
+
+### M10 templates (2026-10-24, checked in the app)
+
+- 16 built-in templates with one-line descriptions: the original four plus Customer discovery, Product demo, Customer check-in, Interview, Project kickoff, Retrospective, Weekly team meeting, Exec or board update, Brainstorm, Troubleshooting, Partner or negotiation, Lecture or learning session.
+- `suggest_template` maps titles to a template (1:1 before weekly, interview, retro, incident, kickoff, demo, discovery, QBR or check-in, board, brainstorm, negotiation, lecture, sales, team sync); a meeting without saved AI notes starts on the suggestion, marked "Suggested" in the template menu.
+- Settings gallery: cards with icon, description, a "Sections" preview and "Copy and edit"; "Your templates" with edit and delete.
+- Tests: Rust 122 (all templates build prompts, ids unique, descriptions present; 15 title cases), Vitest 50.
+- Live check: gallery renders and previews sections. Fixed: the action row now wraps in a narrow card.
