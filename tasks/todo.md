@@ -107,9 +107,46 @@ Builds on the UI refresh (PR #17). Three PRs in this order, each verified in the
 ### Docs
 - PRIVACY.md: calendar data is read on the Mac and stored only as title, time, attendees and event id on recorded meetings; nothing is uploaded.
 
+## Next plan: brand, accounts, templates, speakers (2026-10-22)
+
+Decisions (from the user): file key in dev builds only; Mac Calendar accounts plus direct Google and Microsoft sign-in; local plus cloud speaker separation; "Ink and ember" brand. One PR per milestone, each checked in the app before merging.
+
+### M8: No more Keychain prompts in dev builds (done, PR #22; verified: one migration prompt, then no prompts after rebuilds)
+- Root cause: self-signed builds have no Team ID, so macOS scopes each Keychain approval to the binary's hash and every rebuild asks again. Developer ID releases don't have this.
+- Debug builds keep the database key and API keys in `~/Library/Application Support/com.eshaanjain.parley/dev-secrets.json` (mode 0600). Release builds keep the Keychain. On first run, a debug build migrates the existing Keychain key once (one last prompt) so the encrypted database stays readable.
+- Tests: file mode, round trip, migration path, release path untouched. Docs: README dev notes, PRIVACY.md (dev builds only).
+
+### M9: Ink and ember brand (done, PR #23)
+- Palette: deep ink navy surfaces and text, ember accent, warm neutrals; light, dark and "follow system"; every pair AA-checked. An accent choice in Settings (ember, ocean, forest, plum) re-points one token.
+- Type: Inter for UI and a modern serif for titles (Fraunces or Instrument Serif), both SIL OFL, bundled locally (the CSP blocks remote fonts) and listed in THIRD-PARTY-NOTICES.
+- Logo: a new monogram mark (speech-bubble P) as SVG, then app icon, tray template and favicon regenerated with `tauri icon`.
+- Interaction: ⌘K command palette (go to, search meetings, start recording, new folder, switch theme); hover previews of AI notes on Home rows; empty-state illustrations; toast feedback for saves and moves; keyboard hints throughout.
+- Pre-flight aesthetic check and contrast script; before and after screenshots.
+
+### M10: More AI note templates
+- New built-ins with icons: Customer discovery, Product demo, Customer check-in, Interview (hiring), Project kickoff, Retrospective, Weekly team meeting, Exec or board update, Brainstorm, Troubleshooting, Partner or negotiation, Lecture or learning session.
+- Template gallery in Settings with a preview of each structure; "copy and edit" for any built-in.
+- Suggested template per meeting from the event title and attendees (for example "1:1", "standup", "interview", external domains suggest a customer template); one click to accept.
+- Tests: every template's prompt builds, suggestion rules.
+
+### M11: Calendar accounts (Google and Microsoft sign-in)
+- Settings > Calendar shows Accounts: the Mac's Calendar (as today) plus any number of Google and Microsoft accounts signed in from Parley. Each account can be turned off or removed; calendars are chosen per account.
+- OAuth 2.0 with PKCE and a loopback redirect (the desktop-app flow); read-only scopes (Google `calendar.readonly`, Microsoft `Calendars.Read`); tokens stored like other secrets (file in dev, Keychain in release); refresh handled in the background.
+- Events from all sources are merged and de-duplicated by iCalUID, so an account added both on the Mac and in Parley appears once.
+- Needs from the user: a Google Cloud OAuth client (Desktop app) and a Microsoft Entra app registration (public client). For public release, Google verification of the sensitive `calendar.readonly` scope.
+- Production users: each person signs in to their own accounts; no Parley server holds tokens.
+
+### M12: Who said what
+- Call audio is split into speakers on the Mac with sherpa-onnx speaker diarization (segmentation + embedding ONNX models, about 40 MB, downloaded and checksummed like the speech model) after recording, before audio is deleted. With Deepgram or AssemblyAI, their built-in diarization is used instead.
+- Speakers become "Speaker 1, 2…"; Parley suggests names from calendar attendees and from the transcript ("thanks, Priya"), and the user can confirm or rename them per meeting. Your own microphone stays "You".
+- AI notes and Ask use the names, so action items are assigned to the right person.
+- Tests: segment-to-line alignment, renaming, prompt includes names; fixture audio with two synthetic voices.
+
+Order: M8, M9, M10, M11, M12 (M11 can start as soon as the OAuth app IDs exist).
+
 ## Deferred past v1
 
-Speaker names, on-device diarization, Windows, integrations (Slack, Notion, CRM), sync, mobile.
+Windows, integrations (Slack, Notion, CRM), sync, mobile.
 
 ## What you need to provide
 
