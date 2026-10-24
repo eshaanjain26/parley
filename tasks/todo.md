@@ -111,12 +111,12 @@ Builds on the UI refresh (PR #17). Three PRs in this order, each verified in the
 
 Decisions (from the user): file key in dev builds only; Mac Calendar accounts plus direct Google and Microsoft sign-in; local plus cloud speaker separation; "Ink and ember" brand. One PR per milestone, each checked in the app before merging.
 
-### M8: No more Keychain prompts in dev builds
+### M8: No more Keychain prompts in dev builds (done, PR #22; verified: one migration prompt, then no prompts after rebuilds)
 - Root cause: self-signed builds have no Team ID, so macOS scopes each Keychain approval to the binary's hash and every rebuild asks again. Developer ID releases don't have this.
 - Debug builds keep the database key and API keys in `~/Library/Application Support/com.eshaanjain.parley/dev-secrets.json` (mode 0600). Release builds keep the Keychain. On first run, a debug build migrates the existing Keychain key once (one last prompt) so the encrypted database stays readable.
 - Tests: file mode, round trip, migration path, release path untouched. Docs: README dev notes, PRIVACY.md (dev builds only).
 
-### M9: Ink and ember brand
+### M9: Ink and ember brand (done, PR #23)
 - Palette: deep ink navy surfaces and text, ember accent, warm neutrals; light, dark and "follow system"; every pair AA-checked. An accent choice in Settings (ember, ocean, forest, plum) re-points one token.
 - Type: Inter for UI and a modern serif for titles (Fraunces or Instrument Serif), both SIL OFL, bundled locally (the CSP blocks remote fonts) and listed in THIRD-PARTY-NOTICES.
 - Logo: a new monogram mark (speech-bubble P) as SVG, then app icon, tray template and favicon regenerated with `tauri icon`.
